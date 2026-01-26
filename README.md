@@ -21,7 +21,7 @@
 
 ## 🛠 기술 스택 (Tech Stack)
 - **Language**: Python, SQL
-- **Database**: MySQL
+- **Database**: OracleDB
 - **Collaboration**: GitHub, Notion, Slack
 
 ## 🌲 브랜치 규칙 (Branch Strategy)
