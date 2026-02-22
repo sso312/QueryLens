@@ -1,72 +1,270 @@
-# 🚀 프로젝트 명
->  AI를 활용한 SNS 대체 텍스트 자동 생성 서비스
+﻿# QueryLENs
 
-## 📝 프로젝트 소개
-- **기획 배경**: 왜 이 프로젝트를 시작하게 되었는지 적어주세요.
-- **주요 기능**: 사용자에게 제공하는 핵심 기능들을 나열합니다.
+임상 연구진을 위한 자연어 기반 NL2SQL + 시각화 + PDF 코호트 분석 통합 서비스입니다.
 
-## 👥 팀원 소개 및 역할
-| 이름 | 역할 | 분담 내용 |
-| :--- | :--- | :--- |
-| **팀장명** | Project Manager | 일정 관리, DB 설계, 리포지토리 관리 |
-| **팀원1** | UI/UX Design | 화면 설계, 노션 문서화, 프론트엔드 |
-| **팀원2** | Developer | API 개발, 데이터 전처리, 기술 문서 작성 |
-| **팀원3** | Developer | 데이터사전 정의, 테이블·컬럼 표준화, API 연계, DB 무결성 관리 |
+## 기본 정보
+- 서비스명: `QueryLENs`
+- 기간: `January 23, 2026 18:00 ~ February 26, 2026 16:00`
 
-## 📅 프로젝트 일정 (Stage)
-1. **Initiation (초기화)**: 2026.01.20 ~ 2026.01.22
-2. **Planning (설계)**: 2026.01.23 ~ 2026.01.27
-3. **Executing (실행)**: 2026.01.28 ~ 
-4. **Closing (완료)**: 2026.02.15 예정
+## 기획 배경
+- 임상 연구진이 SQL을 직접 작성하지 않아도 자연어 질문으로 데이터에 접근하도록 지원합니다.
+- MIMIC-IV 기반 분석의 반복 작업(코호트 조건 확인, 집계, 시각화)을 단축합니다.
+- 결과를 통계/차트/해석으로 제공하여 의사결정 인사이트 도출을 돕습니다.
 
-## 🛠 기술 스택 (Tech Stack)
-- **Language**: Python, SQL
-- **Database**: OracleDB
-- **Collaboration**: GitHub, Notion, Slack
+## 주요 기능
+- Text-to-SQL
+  - 자연어 질문 -> SQL 생성
+  - 쿼리 실행 및 결과 미리보기
+- Query Visualization
+  - 결과 테이블 기반 차트 추천/생성
+  - 통계표 및 시각화 인사이트 제공
+- 코호트 분석 (PDF LLM 포함)
+  - PDF 논문 기준 코호트 조건 추출
+  - 코호트 SQL 생성/시뮬레이션
+- 대시보드 저장
+  - 쿼리 결과/차트/요약을 폴더 단위로 저장 및 조회
 
-## 🌲 브랜치 규칙 (Branch Strategy)
-- `master` (또는 `main`): 제품 출시 가능한 상태의 확정본
-- `develop`: 개발 중인 코드들이 모이는 곳
-- `feature/기능명`: 각 팀원이 새로운 기능을 만들 때 사용하는 가지
-  - 예: `feature/login`, `feature/ui-design`
+## 기술 스택 (실제 코드 기준)
+- Frontend: `Next.js`, `React`, `TypeScript`, `Tailwind CSS`, `Plotly`
+- Backend API: `FastAPI`, `Uvicorn`, `Pydantic`, `Pandas`
+- Data: `Oracle Database`, `MongoDB`
+- LLM: `OpenAI API`
+- Infra: `Docker`, `Docker Compose`
 
-## 💬 커밋 메시지 규칙 (Commit Convention)
+## 아키텍처
+### 서비스 흐름
+- `frontend` -> `text-sql(FastAPI)` -> `Oracle / MongoDB / OpenAI`
+- `frontend` -> `plot-chart(FastAPI)` -> `OpenAI / Oracle`
 
-우리 팀은 아래의 **커밋 메시지 규칙**을 준수합니다.
+### 전체 아키텍처 설계도
+```mermaid
+flowchart LR
+    U[사용자 브라우저]
 
----
+    subgraph OCI["OCI 배포 영역"]
+        FE[frontend\nNext.js]
+        AP[api-proxy\nNginx]
+    end
 
-## 1️⃣ LLM 개발
+    subgraph BE["백엔드 서비스 영역"]
+        TS[text-sql\nFastAPI]
+        VZ[plot-chart\nFastAPI]
+        ORA[(Oracle Database)]
+        MON[(MongoDB)]
+        OAI[OpenAI API]
+    end
 
-| 말머리 (Tag) | 의미 (Meaning) | 사용 경우 (Case) |
-|--------------|---------------|------------------|
-| **Model** | LLM / 모델 설정 | LLM API 교체 (예: GPT-4o → Claude 3.5), 하이퍼파라미터 변경 |
-| **Prompt** | 프롬프트 수정 | txt2SQL 정확도 향상을 위한 시스템 프롬프트 또는 지시문 수정 |
-| **RAG** | 검색 엔진 작업 | 벡터 DB 구축, 문서 임베딩(Embedding), 검색 로직 수정 |
-| **Data** | 데이터 전처리 | SQL 학습 데이터셋 추가, DB 스키마(Table) 정보 업데이트 |
-| **SQL** | 쿼리 로직 수정 | 생성된 SQL 문법 오류 수정, 쿼리 실행기(Executor) 코드 변경 |
-| **Feat** | 기능 추가 | 챗봇 UI 생성, 새로운 API 엔드포인트 개발 |
-| **Fix** | 버그 수정 | 코드 오류 해결, API 연결 오류 등 기술적 결함 수정 |
-| **Docs** | 문서 수정 | README.md 작성/수정, 프로젝트 기획서 또는 API 명세서 업데이트 |
-| **Test** | 테스트 관련 | txt2SQL 정확도 평가(Evaluation) 코드 작성 및 테스트 실행 |
+    U --> FE
+    FE -->|API 요청| AP
+    AP -->|/api/*| TS
+    AP -->|/visualize| VZ
 
----
+    TS --> ORA
+    TS --> MON
+    TS --> OAI
 
-## 2️⃣ UI / UX 개발
+    VZ --> ORA
+    VZ --> OAI
+```
 
-| 말머리 (Tag) | 의미 (Meaning) | 사용 경우 (Case) |
-|--------------|---------------|------------------|
-| **Feat** | 기능 추가 | 새로운 기능을 처음 구현했을 때 |
-| **Fix** | 버그 수정 | 코드 오류나 동작 문제를 수정했을 때 |
-| **Design** | 디자인 변경 | 화면 레이아웃, 색상, 폰트 등 UI 변경 |
-| **Docs** | 문서 수정 | README.md, 기획서 등 문서 작성 또는 수정 |
-| **Style** | 스타일 수정 | 기능 변경 없이 코드 정렬, 가독성 개선 |
-| **Rename** | 이름 변경 | 파일명 또는 폴더명 변경 |
+### Docker 네트워크
+- 단일 브리지 네트워크 `query-lens-net` 사용
+- 컨테이너 간 서비스명 기반 통신
+  - UI -> Text-to-SQL: `http://text-sql:8000`
+  - UI -> Visualization: `http://plot-chart:8080`
 
----
+## 폴더 구조 (재편 후)
+```text
+root
+├── frontend
+├── backend
+│   ├── text-to-sql
+│   │   ├── backend/app
+│   │   │   ├── api/routes
+│   │   │   ├── services
+│   │   │   └── core
+│   │   └── var
+│   └── query-visualization
+│       └── src
+│           ├── api
+│           ├── agent
+│           ├── db
+│           └── utils
+├── db
+│   └── ddl
+├── docker
+│   ├── frontend.Dockerfile
+│   ├── text-sql.api.Dockerfile
+│   └── query-visualization.api.Dockerfile
+└── docker-compose.yml
+```
 
-### 🤙**작성 시 3가지 약속**
+## 실행 방법
+루트에서 아래 한 줄로 전체 서비스 실행:
 
-1. **첫 글자는 대문자로**: 가독성을 위해 말머리 **첫 글자는 대문자**로 시작.
-2. **명확하게**: "수정함", "작업함" 같은 모호한 단어 대신 **"배경 색상 변경", "이메일 오타 수정"**처럼 구체적으로 적습니다.
-3. **한 커밋에 한 작업만**: 여러 기능을 한꺼번에 올리지 말고, **작은 단위로 자주 올리는 것**이 협업에 유리합니다.
+```bash
+docker-compose up --build
+```
+
+상태 확인:
+
+```bash
+docker-compose ps
+```
+
+종료:
+
+```bash
+docker-compose down
+```
+
+## 환경변수 설명
+### 1) 루트 `.env`
+- `TEXT_SQL_HOST_PORT`: Text-to-SQL 외부 노출 포트
+- `VIS_API_HOST_PORT`: Visualization API 외부 노출 포트
+- `UI_HOST_PORT`: UI 외부 노출 포트
+
+### 2) `backend/text-to-sql/.env`
+- Oracle 연결: `ORACLE_*`
+- OpenAI/모델/보호 정책: `OPENAI_*`, `*_MODEL`, `DB_TIMEOUT_SEC` 등
+- RAG/Mongo: `MONGO_*`, `RAG_*`
+
+### 3) `backend/query-visualization/.env`
+- OpenAI: `OPENAI_*`
+- Oracle: `ORACLE_*`
+- 큐/요청 제한: `VIS_QUEUE_*`, `VIS_*`
+
+## API 엔드포인트 요약
+### Text-to-SQL (`text-sql`)
+- Health
+  - `GET /health`
+- Query
+  - `POST /query/oneshot`
+  - `POST /query/run`
+  - `POST /query/answer`
+  - `POST /query/transcribe`
+  - `GET /query/get`
+  - `GET /query/demo/questions`
+- Audit
+  - `GET /audit/logs`
+  - `DELETE /audit/logs/{log_id}`
+- Dashboard
+  - `GET /dashboard/queries`
+  - `POST /dashboard/queries`
+  - `POST /dashboard/saveQuery`
+  - `POST /dashboard/queryBundles`
+- Cohort/PDF
+  - `POST /cohort/simulate`
+  - `POST /cohort/sql`
+  - `GET/POST/PATCH/DELETE /cohort/library...`
+  - `POST /pdf/upload`
+  - `GET /pdf/status/{task_id}`
+  - `GET /pdf/history`
+
+### Visualization (`plot-chart`)
+- `GET /health`
+- `GET /db-test`
+- `POST /visualize`
+
+## Backend 도메인 분리 내역
+기존 비즈니스 로직 보존 원칙에 따라 내부 함수 재작성 없이 **경로 정리 중심**으로 분리했습니다.
+
+- Text-to-SQL 도메인: `backend/text-to-sql/backend/app/services/*`
+- Visualization 도메인: `backend/query-visualization/src/agent`, `backend/query-visualization/src/api`
+- PDF LLM 도메인: `backend/text-to-sql/backend/app/services/pdf_service.py` 및 연관 route
+
+참고: 본 프로젝트는 기존에 FastAPI 기반 서비스가 이미 분리되어 있어, 단일 Express 인스턴스로 강제 통합하면 로직 변경 범위가 커집니다. 최소 침습 원칙에 맞춰 서비스 경계를 유지했습니다.
+
+## 실행 안정성 보완 내역
+```json
+[
+  {
+    "area": "backend",
+    "issue": "text-to-sql app.main의 dashboard 중복 import",
+    "riskLevel": "LOW",
+    "fix": "중복 import 1건 제거"
+  },
+  {
+    "area": "backend",
+    "issue": "query-visualization API의 CORS 미설정",
+    "riskLevel": "MEDIUM",
+    "fix": "CORS_ALLOW_ORIGINS 기반 CORSMiddleware 추가"
+  },
+  {
+    "area": "frontend",
+    "issue": "QueryView의 localhost 하드코딩 fallback",
+    "riskLevel": "MEDIUM",
+    "fix": "NEXT_PUBLIC_API_BASE_URL 또는 same-origin rewrite만 사용"
+  },
+  {
+    "area": "docker",
+    "issue": "UI 단일 스테이지 이미지 크기 증가",
+    "riskLevel": "LOW",
+    "fix": "frontend Dockerfile을 multi-stage(builder/runner)로 전환"
+  }
+]
+```
+
+## 팀원 역할 정리 (기술 기여 중심)
+| 팀원 | 역할 | 기여 내용 |
+| --- | --- | --- |
+| **박소현 (팀장)** | `Lead / Full-Stack` |  |
+| **박채린** | `PM / 기획` |  |
+| **고민정** | `Full-Stack` |  |
+| **배성경** | `AI / RAG` |  |
+
+## 구조 정리 및 개선 요약
+- 루트 구조를 `frontend / backend / db / docker` 중심으로 재배치
+- Dockerfile 경로를 `docker/*`로 통합
+- `docker-compose.yml`의 build context / env_file / volume 경로를 재배치 구조에 맞게 수정
+- UI-Backend 연결을 컨테이너 서비스명 기준으로 정리 (`text-sql`, `plot-chart`)
+- 기능/비즈니스 로직 재작성 없이 실행 경로와 운영 안정성 위주로 최소 수정
+
+## OCI 서버 배포 가이드
+> 상세 Runbook: `DEPLOY-OCI.md`
+> 대상 인스턴스: `instance-team9 (146.56.175.190)`
+
+### 1. 사전 준비
+- OCI 서버에 Docker/Compose 설치
+- KEY 파일 준비: `./instance-team9.key`
+- 루트 `.env` 설정:
+  - `FRONTEND_PORT=8000`
+  - `API_PORT=80`
+  - `BACKEND_URL=http://host.docker.internal:4000` (또는 `http://<LOCAL_IP>:<PORT>`)
+  - `OCI_HOST=146.56.175.190`
+
+### 2. 최초 배포
+```bash
+./scripts/deploy-oci.sh
+```
+
+접속 링크:
+- Frontend: `http://146.56.175.190:8000`
+- API Health: `http://146.56.175.190/api/health`
+
+### 3. 재배포 (frontend만 / api만)
+```bash
+docker compose build frontend && docker compose up -d frontend
+docker compose build api && docker compose up -d api
+```
+
+### 4. 상태 확인
+```bash
+./scripts/check-oci.sh
+```
+
+### 5. 로컬 backend 연결 방법
+- 권장: VPN/공인 IP 또는 SSH Reverse Tunnel (`ssh -R`) 기반 연결
+- 1회 설정(OCI):
+```bash
+ssh -i instance-team9.key opc@146.56.175.190 \
+  "echo 'GatewayPorts clientspecified' | sudo tee /etc/ssh/sshd_config.d/querylens-tunnel.conf >/dev/null && sudo systemctl restart sshd"
+```
+- 터널 실행(기본: 로컬 `8002` -> OCI `4000`):
+```bash
+./scripts/start-oci-tunnel.sh
+```
+
+### 6. 자주 발생 문제
+- `api/health` 실패: `BACKEND_URL`, 로컬 backend 상태, `./scripts/start-oci-tunnel.sh` 실행 상태 확인
+- `frontend` 미접속: OCI 보안 목록/NSG 포트(80, 8000) 확인
