@@ -10,6 +10,5 @@ instance-team9.key
 .DS_Store
 *.DS_Store
 
-# Exclude GitHub-blocked oversized Instant Client binaries
-backend/query-visualization/oracle/instantclient_23_26/oraociei.dll
-backend/query-visualization/oracle/instantclient_23_26/libociei.so
+# Oracle Instant Client binaries (local only)
+backend/query-visualization/oracle/instantclient_*/
