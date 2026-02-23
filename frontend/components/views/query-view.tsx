@@ -4173,18 +4173,18 @@ export function QueryView() {
     }
   }
 
-  const handleCopyMessage = async (messageId: string, text: string) => {
+  const handleCopyMessage = async (messageKey: string, text: string) => {
     const trimmed = text.trim()
     if (!trimmed) return
     try {
       const copied = await writeTextToClipboard(text)
       if (!copied) throw new Error("clipboard copy failed")
-      setCopiedMessageId(messageId)
+      setCopiedMessageId(messageKey)
       if (messageCopyTimerRef.current !== null) {
         window.clearTimeout(messageCopyTimerRef.current)
       }
       messageCopyTimerRef.current = window.setTimeout(() => {
-        setCopiedMessageId((current) => (current === messageId ? null : current))
+        setCopiedMessageId((current) => (current === messageKey ? null : current))
         messageCopyTimerRef.current = null
       }, 1600)
     } catch {
@@ -5041,13 +5041,14 @@ export function QueryView() {
               </div>
             ) : (
               messages.map((message, idx) => {
+                const messageCopyKey = `${message.id}-${message.role}-${idx}`
                 const isUser = message.role === "user"
                 const isAssistant = message.role === "assistant"
                 const isLastMessage = idx === messages.length - 1
                 const showSuggestions = isAssistant && isLastMessage && suggestedQuestions.length > 0
                 const canActOnMessage = Boolean(message.content.trim())
                 return (
-                  <div key={message.id} className={cn(
+                  <div key={messageCopyKey} className={cn(
                     "flex flex-col",
                     isUser ? "items-end" : "items-start"
                   )}>
@@ -5059,14 +5060,14 @@ export function QueryView() {
                             variant="ghost"
                             size="icon-sm"
                             className="h-5 w-5 text-muted-foreground hover:text-foreground"
-                            title={copiedMessageId === message.id ? "복사됨" : "복사"}
+                            title={copiedMessageId === messageCopyKey ? "복사됨" : "복사"}
                             aria-label="질문 복사"
                             onClick={() => {
-                              void handleCopyMessage(message.id, message.content)
+                              void handleCopyMessage(messageCopyKey, message.content)
                             }}
                             disabled={!canActOnMessage}
                           >
-                            {copiedMessageId === message.id ? (
+                            {copiedMessageId === messageCopyKey ? (
                               <Check className="h-2.5 w-2.5 text-emerald-500" />
                             ) : (
                               <Copy className="h-2.5 w-2.5" />
@@ -5108,14 +5109,14 @@ export function QueryView() {
                             variant="ghost"
                             size="icon-sm"
                             className="h-5 w-5 text-muted-foreground hover:text-foreground"
-                            title={copiedMessageId === message.id ? "복사됨" : "복사"}
+                            title={copiedMessageId === messageCopyKey ? "복사됨" : "복사"}
                             aria-label="답변 복사"
                             onClick={() => {
-                              void handleCopyMessage(message.id, message.content)
+                              void handleCopyMessage(messageCopyKey, message.content)
                             }}
                             disabled={!canActOnMessage}
                           >
-                            {copiedMessageId === message.id ? (
+                            {copiedMessageId === messageCopyKey ? (
                               <Check className="h-2.5 w-2.5 text-emerald-500" />
                             ) : (
                               <Copy className="h-2.5 w-2.5" />
