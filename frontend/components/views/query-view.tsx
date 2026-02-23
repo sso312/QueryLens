@@ -4135,11 +4135,50 @@ export function QueryView() {
     }
   }, [isLoading])
 
+  const writeTextToClipboard = async (text: string) => {
+    const value = String(text || "")
+    if (!value) return false
+
+    try {
+      if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value)
+        return true
+      }
+    } catch {
+      // Fallback below for environments where Clipboard API is blocked.
+    }
+
+    if (typeof document === "undefined") return false
+
+    let textarea: HTMLTextAreaElement | null = null
+    try {
+      textarea = document.createElement("textarea")
+      textarea.value = value
+      textarea.setAttribute("readonly", "")
+      textarea.style.position = "fixed"
+      textarea.style.top = "-9999px"
+      textarea.style.left = "-9999px"
+      textarea.style.opacity = "0"
+      document.body.appendChild(textarea)
+      textarea.focus()
+      textarea.select()
+      textarea.setSelectionRange(0, textarea.value.length)
+      return document.execCommand("copy")
+    } catch {
+      return false
+    } finally {
+      if (textarea && textarea.parentNode) {
+        textarea.parentNode.removeChild(textarea)
+      }
+    }
+  }
+
   const handleCopyMessage = async (messageId: string, text: string) => {
     const trimmed = text.trim()
     if (!trimmed) return
     try {
-      await navigator.clipboard.writeText(text)
+      const copied = await writeTextToClipboard(text)
+      if (!copied) throw new Error("clipboard copy failed")
       setCopiedMessageId(messageId)
       if (messageCopyTimerRef.current !== null) {
         window.clearTimeout(messageCopyTimerRef.current)
@@ -4772,7 +4811,8 @@ export function QueryView() {
   const handleCopySql = async () => {
     if (!displaySql) return
     try {
-      await navigator.clipboard.writeText(displaySql)
+      const copied = await writeTextToClipboard(displaySql)
+      if (!copied) throw new Error("clipboard copy failed")
       setIsSqlCopied(true)
       if (sqlCopyTimerRef.current !== null) {
         window.clearTimeout(sqlCopyTimerRef.current)
