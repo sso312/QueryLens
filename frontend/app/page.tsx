@@ -13,7 +13,7 @@ import { PdfCohortView } from "@/components/views/pdf-cohort-view"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { useAuth } from "@/components/auth-provider"
 import { Badge } from "@/components/ui/badge"
-import { Database, Shield, Bell, Menu, LogOut, MessageSquare, LayoutDashboard, FileText, Users } from "lucide-react"
+import { Database, Bell, Menu, LogOut, MessageSquare, LayoutDashboard, FileText, Users } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent } from "@/components/ui/sheet"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
@@ -210,12 +210,6 @@ export default function Home() {
               <Database className="w-3.5 h-3.5" />
               <span className="hidden lg:inline">MIMIC-IV 연동</span>
               <Badge variant="outline" className="text-[10px]">Read-Only</Badge>
-            </div>
-
-            {/* HIPAA Badge - Hidden on mobile */}
-            <div className="hidden md:flex items-center gap-2 text-xs text-primary">
-              <Shield className="w-3.5 h-3.5" />
-              <span className="hidden lg:inline">HIPAA 준수</span>
             </div>
 
             {/* Theme Toggle */}

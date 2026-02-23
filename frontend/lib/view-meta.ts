@@ -19,7 +19,7 @@ export const VIEW_META: Record<ViewType, { title: string; subtitle?: string }> =
   },
   cohort: {
     title: "단면 연구 집단",
-    subtitle: "가상 코호트를 생성하고 조건 변경 결과를 시뮬레이션합니다.",
+    subtitle: "코호트를 생성하고 조건 변경 결과를 시뮬레이션합니다.",
   },
   "pdf-cohort": {
     title: "PDF 코호트 분석",

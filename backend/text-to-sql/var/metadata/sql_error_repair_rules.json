@@ -496,6 +496,19 @@
       "last_used_at": 1771739317,
       "success_count": 1,
       "updated_at": 1771739317
+    },
+    {
+      "created_at": 1771759495,
+      "error_signature": "ORA-00904",
+      "failed_sql_hash": "d03cf4ad0ec6a9ca083f0387822c91393e417fe8d6a882b519e8a3884c6fe9c3",
+      "failed_sql_sample": "SELECT sepsis_status, COUNT(DISTINCT icu_deaths.hadm_id) / COUNT(DISTINCT icu_stays.hadm_id) AS icu_mortality_rate\nFROM (\n    SELECT icu_stays.hadm_id, \n           CASE WHEN EXISTS (\n               SELECT 1 FROM DIAGNOSES_ICD \n               WHERE DIAGNOSES_ICD.hadm_id = icu_stays.hadm_id \n                 AND DIAGNOSES_ICD.ICD_CODE LIKE 'A41%' \n                 AND DIAGNOSES_ICD.ICD_VERSION = 10\n                 AND DIAGNOSES_ICD.SEQ_NUM <= 48\n           ) THEN 'Sepsis' ELSE 'No Sepsis' END AS ",
+      "fixed_sql": "WITH sepsis_cohort AS (\n    SELECT icu_stays.hadm_id, \n           CASE WHEN EXISTS (\n               SELECT 1 FROM DIAGNOSES_ICD \n               WHERE DIAGNOSES_ICD.hadm_id = icu_stays.hadm_id \n                 AND DIAGNOSES_ICD.ICD_CODE LIKE 'A41%' \n                 AND DIAGNOSES_ICD.ICD_VERSION = 10\n                 AND DIAGNOSES_ICD.SEQ_NUM <= 48\n           ) THEN 'Sepsis' ELSE 'No Sepsis' END AS sepsis_status\n    FROM ICUSTAYS icu_stays\n    JOIN PROCEDURES_ICD proc_icd ON icu_stays.hadm_id = proc_icd.hadm_id\n    WHERE proc_icd.ICD_CODE LIKE '38.93%' AND proc_icd.ICD_VERSION = 9\n      AND proc_icd.CHARTDATE BETWEEN icu_stays.INTIME AND icu_stays.INTIME + INTERVAL '48' HOUR\n), icu_deaths AS (\n    SELECT icu_stays.hadm_id\n    FROM ICUSTAYS icu_stays\n    JOIN ADMISSIONS adm ON icu_stays.hadm_id = adm.hadm_id\n    WHERE adm.DEATHTIME BETWEEN icu_stays.INTIME AND icu_stays.OUTTIME\n)\nSELECT sepsis_status, COUNT(DISTINCT icu_deaths.hadm_id) / COUNT(DISTINCT sepsis_cohort.hadm_id) AS icu_mortality_rate\nFROM sepsis_cohort\nLEFT JOIN icu_deaths ON sepsis_cohort.hadm_id = icu_deaths.hadm_id\nGROUP BY sepsis_status",
+      "fixed_sql_hash": "72b0c46510cb11193588a53a774d3f00bd57496cf126cd8ce3ce793985ef7790",
+      "hit_count": 0,
+      "id": "c6210e3045784b2992586b55dfb3dacb",
+      "last_used_at": 1771759495,
+      "success_count": 1,
+      "updated_at": 1771759495
     }
   ]
 }
