@@ -1455,6 +1455,7 @@ export function QueryView() {
   const [lastQuestion, setLastQuestion] = useState<string>("")
   const [suggestedQuestions, setSuggestedQuestions] = useState<string[]>([])
   const [activeCohortContext, setActiveCohortContext] = useState<ActiveCohortContext | null>(null)
+  const [isCohortContextExpanded, setIsCohortContextExpanded] = useState(false)
   const [savedCohorts, setSavedCohorts] = useState<SavedCohort[]>([])
   const [isCohortLibraryLoading, setIsCohortLibraryLoading] = useState(false)
   const [isCohortLibraryOpen, setIsCohortLibraryOpen] = useState(false)
@@ -1466,7 +1467,7 @@ export function QueryView() {
   const [isHydrated, setIsHydrated] = useState(false)
   const [isSqlDragging, setIsSqlDragging] = useState(false)
   const [isDesktopLayout, setIsDesktopLayout] = useState(false)
-  const [resultsPanelWidth, setResultsPanelWidth] = useState(55)
+  const [resultsPanelWidth, setResultsPanelWidth] = useState(60)
   const [isPanelResizing, setIsPanelResizing] = useState(false)
   const [visibleTabLimit, setVisibleTabLimit] = useState(3)
   const [selectedStatsBoxColumn, setSelectedStatsBoxColumn] = useState<string>("")
@@ -2655,6 +2656,7 @@ export function QueryView() {
       .replace(/^\s*source:\s*.+$/gim, "")
       .replace(/^\s*recommended reason:\s*.+$/gim, "")
       .replace(/\bsource\s*:\s*llm\b/gi, "")
+      .replace(/시각화\s*LLM\s*인사이트\s*생성에\s*실패했습니다\.?(\s*\([^)]*\))?/gi, "")
       .replace(/\n{3,}/g, "\n\n")
       .trim()
   }
@@ -2777,10 +2779,8 @@ export function QueryView() {
       return "시각화 LLM이 SQL과 쿼리 결과를 기반으로 인사이트를 생성 중입니다."
     }
     if (visualizationError) {
-      if (localInsight) {
-        return `${localInsight}\n시각화 LLM 인사이트 생성에 실패했습니다. (${visualizationError})`
-      }
-      return `시각화 LLM 인사이트 생성에 실패했습니다. (${visualizationError})`
+      if (localInsight) return localInsight
+      return "시각화 API 응답 지연으로 로컬 통계 기반 해석을 제공합니다."
     }
     if (localInsight) {
       return localInsight
@@ -2804,7 +2804,6 @@ export function QueryView() {
     () => (activeCohortContext ? buildCohortStarterQuestions(activeCohortContext) : []),
     [activeCohortContext]
   )
-  const visibleBannerQuestions = cohortStarterQuestions.length > 0 ? cohortStarterQuestions : quickQuestions.slice(0, 3)
   const isPdfContextTableVisible =
     Boolean(activeCohortContext) &&
     Boolean(pdfContextBanner.context) &&
@@ -2831,6 +2830,8 @@ export function QueryView() {
     Boolean(runResult) ||
     query.trim().length > 0 ||
     Boolean(activeCohortContext)
+  const showCenteredOnboarding = messages.length === 0 && !showResults
+  const shouldHideInlineQuickQuestions = isPdfContextTableVisible
   const shouldShowResizablePanels = showResults && isDesktopLayout
   const chatPanelStyle = shouldShowResizablePanels ? { width: `${100 - resultsPanelWidth}%` } : undefined
   const resultsPanelStyle = shouldShowResizablePanels ? { width: `${resultsPanelWidth}%` } : undefined
@@ -3310,6 +3311,7 @@ export function QueryView() {
   const applyPdfContextBanner = (context: ActiveCohortContext | null) => {
     if (!context) {
       setPdfContextBanner({ context: null, hasShownTableOnce: true })
+      setIsCohortContextExpanded(false)
       return
     }
     let hasShownTableOnce = false
@@ -3321,6 +3323,7 @@ export function QueryView() {
       context: toPdfCohortContext(context),
       hasShownTableOnce,
     })
+    setIsCohortContextExpanded(false)
   }
 
   const markPdfContextTableAsShown = (context: ActiveCohortContext | null) => {
@@ -3359,6 +3362,7 @@ export function QueryView() {
       setQuickQuestions(DEFAULT_QUICK_QUESTIONS)
       activeCohortContextRef.current = null
       setActiveCohortContext(null)
+      setIsCohortContextExpanded(false)
       applyPdfContextBanner(null)
       clearPendingActiveCohortContext(chatHistoryUser)
       fetch(apiUrl("/chat/history"), {
@@ -4910,6 +4914,267 @@ export function QueryView() {
     })
   }
 
+  const renderChatInputComposer = (options?: { centered?: boolean }) => {
+    const centered = Boolean(options?.centered)
+    const cohortDetailContext =
+      activeCohortContext
+        ? (pdfContextBanner.context ?? toPdfCohortContext(activeCohortContext))
+        : null
+    const cohortVariables = Array.isArray(cohortDetailContext?.keyVariables)
+      ? cohortDetailContext.keyVariables
+      : []
+    const cohortAppliedAtText = cohortDetailContext?.appliedAt
+      ? new Date(cohortDetailContext.appliedAt).toLocaleString()
+      : "-"
+    return (
+      <div
+        className={cn(
+          "rounded-2xl border border-border bg-card px-2.5 py-2 shadow-xs",
+          centered && "mx-auto w-full max-w-3xl border-border/70 bg-background/95 px-3 py-3 shadow-md"
+        )}
+      >
+        {activeCohortContext && (
+          <div className="mb-2 rounded-xl border border-primary/25 bg-primary/5 px-2.5 py-2">
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 text-[11px] font-medium text-primary">
+                  <FileText className="h-3.5 w-3.5" />
+                  코호트 컨텍스트 적용됨
+                </div>
+                <p className="truncate text-[11px] text-muted-foreground">
+                  {activeCohortContext.filename || activeCohortContext.cohortName}
+                </p>
+              </div>
+              <div className="flex items-center gap-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2 text-[11px] bg-background/90"
+                  onClick={() => setIsCohortContextExpanded((prev) => !prev)}
+                >
+                  {isCohortContextExpanded ? "상세 정보 숨기기" : "상세 정보 확인"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 text-[11px]"
+                  onClick={clearActiveCohortContext}
+                >
+                  해제
+                </Button>
+              </div>
+            </div>
+            {!isCohortContextExpanded && (
+              <div className="mt-2 rounded-md border border-dashed border-border/70 bg-background/80 px-3 py-2 text-[11px] text-muted-foreground">
+                코호트 상세 정보는 <span className="font-medium text-foreground">상세 정보 확인</span>을 눌러 선택적으로 볼 수 있습니다.
+              </div>
+            )}
+            {isCohortContextExpanded && cohortDetailContext && (
+              <div className="mt-2 space-y-2">
+                <div className="overflow-x-auto rounded-md border border-border/70 bg-background/90">
+                  <table className="w-full min-w-[460px] text-xs">
+                    <tbody>
+                      <tr className="border-b border-border/70">
+                        <th className="w-36 bg-muted/40 px-3 py-2 text-left font-medium text-muted-foreground">
+                          대상 환자 수
+                        </th>
+                        <td className="px-3 py-2 text-foreground">
+                          {cohortDetailContext.cohortSize != null
+                            ? `${cohortDetailContext.cohortSize.toLocaleString()}명`
+                            : "-"}
+                        </td>
+                      </tr>
+                      <tr className="border-b border-border/70">
+                        <th className="bg-muted/40 px-3 py-2 text-left font-medium text-muted-foreground">
+                          핵심 변수
+                        </th>
+                        <td className="px-3 py-2 text-foreground">
+                          {(() => {
+                            if (!cohortVariables.length) return "-"
+                            const preview = cohortVariables.slice(0, 3).join(", ")
+                            const remains = Math.max(0, cohortVariables.length - 3)
+                            return remains > 0 ? `${preview} +${remains} more` : preview
+                          })()}
+                        </td>
+                      </tr>
+                      <tr className="border-b border-border/70">
+                        <th className="bg-muted/40 px-3 py-2 text-left font-medium text-muted-foreground">
+                          코호트 기준 요약
+                        </th>
+                        <td className="px-3 py-2 text-foreground">
+                          {activeCohortContext.criteriaSummaryKo || activeCohortContext.summaryKo || "-"}
+                        </td>
+                      </tr>
+                      <tr>
+                        <th className="bg-muted/40 px-3 py-2 text-left font-medium text-muted-foreground">
+                          적용 시각
+                        </th>
+                        <td className="px-3 py-2 text-foreground">{cohortAppliedAtText}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        <Textarea
+          placeholder={centered ? "무엇이든 물어보세요..." : "자연어로 질문하세요..."}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          className={cn(
+            "resize-none border-0 bg-transparent px-1 py-1.5 text-sm shadow-none focus-visible:ring-0",
+            centered ? "min-h-[52px]" : "min-h-[64px]"
+          )}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault()
+              handleSubmit()
+            }
+          }}
+        />
+        <div className="mt-2 flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className="h-8 w-8 rounded-full"
+              title="코호트 라이브러리 열기"
+              aria-label="코호트 라이브러리 열기"
+              onClick={() => {
+                void loadSavedCohortLibrary()
+                setIsCohortLibraryOpen(true)
+              }}
+            >
+              <Plus className="h-4 w-4" />
+            </Button>
+            <Select value={selectedModel} onValueChange={setSelectedModel}>
+              <SelectTrigger className="h-8 w-[152px] rounded-full border-border/70 bg-background text-xs">
+                <SelectValue placeholder="모델 선택" />
+              </SelectTrigger>
+              <SelectContent>
+                {modelOptions.map((model) => (
+                  <SelectItem key={model} value={model}>
+                    {model}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <div className="relative">
+              {isVoiceModeOn && (
+                <span className="pointer-events-none absolute inset-0 rounded-full border border-primary/70 animate-ping" />
+              )}
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className={cn(
+                  "relative h-8 w-8 rounded-full transition-colors",
+                  isVoiceModeOn && "bg-primary/10 text-primary",
+                  isVoiceTranscribing && "bg-primary/10 text-primary"
+                )}
+                title={
+                  isVoiceTranscribing
+                    ? "음성 변환 중"
+                    : isVoiceModeOn
+                      ? "음성 입력 중지"
+                      : "음성 입력 시작"
+                }
+                aria-label={
+                  isVoiceTranscribing
+                    ? "음성 변환 중"
+                    : isVoiceModeOn
+                      ? "음성 입력 중지"
+                      : "음성 입력 시작"
+                }
+                onClick={handleToggleVoiceInput}
+                disabled={!isSpeechSupported || isVoiceTranscribing || isVoiceModeOn}
+              >
+                {isVoiceTranscribing ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Mic className="h-4 w-4" />
+                )}
+              </Button>
+            </div>
+          </div>
+          <Button
+            onClick={handleSubmit}
+            disabled={isLoading || isVoiceModeOn || isVoiceTranscribing || !query.trim()}
+            className="h-9 w-9 rounded-full p-0"
+            title="전송"
+            aria-label="전송"
+          >
+            <Send className="h-4 w-4" />
+          </Button>
+        </div>
+        {isVoiceModeOn && (
+          <div className="mt-2 flex items-center gap-2 rounded-full border border-border bg-card/95 px-2 py-1.5 text-foreground shadow-sm">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              onClick={handleCancelVoiceInput}
+              className="h-9 w-9 rounded-full border border-border bg-secondary text-secondary-foreground hover:bg-secondary/80"
+              title="녹음 취소"
+              aria-label="녹음 취소"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+            <div className="min-w-0 flex-1 px-1">
+              <div className="h-7 overflow-hidden rounded-full border border-border/70 bg-muted/30 px-2">
+                <div className="flex h-full items-center gap-[3px]">
+                  {voiceWaveLevels.map((level, idx) => (
+                    <span
+                      key={`voice-wave-${idx}`}
+                      className="w-[2px] rounded-full bg-primary transition-[height,opacity] duration-75 ease-out"
+                      style={{
+                        height: `${4 + Math.round(level * 18)}px`,
+                        opacity: 0.2 + Math.min(0.8, level),
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+            <span className="w-11 text-right text-lg font-semibold tabular-nums tracking-tight text-foreground">
+              {formatVoiceElapsed(voiceElapsedMs)}
+            </span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              onClick={handleConfirmVoiceInput}
+              className="h-9 w-9 rounded-full bg-primary text-primary-foreground hover:bg-primary/90"
+              title="녹음 확정"
+              aria-label="녹음 확정"
+              disabled={!isListening}
+            >
+              <Check className="h-4 w-4" />
+            </Button>
+          </div>
+        )}
+        {isVoiceTranscribing && (
+          <div className="mt-2 flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-2 py-1.5 text-[11px] text-primary">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <span className="font-medium">음성 변환 중...</span>
+            <span className="min-w-0 truncate text-muted-foreground">
+              {voiceInterimText || "녹음된 음성을 텍스트로 변환하고 있습니다."}
+            </span>
+          </div>
+        )}
+        {!isSpeechSupported && (
+          <div className="mt-2 px-1 text-[11px] text-muted-foreground">
+            QueryLENs는 실수를 할 수 있습니다. 중요한 정보는 재차 확인하세요.
+          </div>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col h-[calc(100vh-56px)] sm:h-[calc(100vh-64px)]">
       {/* Main Content */}
@@ -4922,7 +5187,7 @@ export function QueryView() {
           )}
           style={chatPanelStyle}
         >
-          {isPdfContextTableVisible && activeCohortContext && pdfContextBanner.context && (
+          {!showCenteredOnboarding && isPdfContextTableVisible && activeCohortContext && pdfContextBanner.context && (
             <div className="shrink-0 border-b border-border bg-background/95 p-4">
               <div className="rounded-lg border border-primary/25 bg-primary/5 p-3">
                 <div className="mb-2 flex items-center justify-between gap-2">
@@ -4933,77 +5198,73 @@ export function QueryView() {
                     </div>
                     <p className="truncate text-[12px] text-muted-foreground">{pdfContextBanner.context.pdfName}</p>
                   </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 px-2 text-[11px]"
-                    onClick={clearActiveCohortContext}
-                  >
-                    해제
-                  </Button>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-[11px]"
+                      onClick={() => setIsCohortContextExpanded((prev) => !prev)}
+                    >
+                      {isCohortContextExpanded ? "상세 정보 숨기기" : "상세 정보 확인"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-[11px]"
+                      onClick={clearActiveCohortContext}
+                    >
+                      해제
+                    </Button>
+                  </div>
                 </div>
-                <div className="overflow-x-auto rounded-md border border-border/70 bg-background/90">
-                  <table className="w-full min-w-[460px] text-xs">
-                    <tbody>
-                      <tr className="border-b border-border/70">
-                        <th className="w-36 bg-muted/40 px-3 py-2 text-left font-medium text-muted-foreground">대상 환자 수</th>
-                        <td className="px-3 py-2 text-foreground">
-                          {pdfContextBanner.context.cohortSize != null
-                            ? `${pdfContextBanner.context.cohortSize.toLocaleString()}명`
-                            : "-"}
-                        </td>
-                      </tr>
-                      <tr className="border-b border-border/70">
-                        <th className="bg-muted/40 px-3 py-2 text-left font-medium text-muted-foreground">핵심 변수</th>
-                        <td className="px-3 py-2 text-foreground">
-                          {(() => {
-                            const vars = Array.isArray(pdfContextBanner.context?.keyVariables)
-                              ? pdfContextBanner.context.keyVariables
-                              : []
-                            if (!vars.length) return "-"
-                            const preview = vars.slice(0, 3).join(", ")
-                            const remains = Math.max(0, vars.length - 3)
-                            return remains > 0 ? `${preview} +${remains} more` : preview
-                          })()}
-                        </td>
-                      </tr>
-                      <tr className="border-b border-border/70">
-                        <th className="bg-muted/40 px-3 py-2 text-left font-medium text-muted-foreground">코호트 기준 요약</th>
-                        <td className="px-3 py-2 text-foreground">
-                          {activeCohortContext.criteriaSummaryKo || activeCohortContext.summaryKo || "-"}
-                        </td>
-                      </tr>
-                      <tr>
-                        <th className="bg-muted/40 px-3 py-2 text-left font-medium text-muted-foreground">적용 시각</th>
-                        <td className="px-3 py-2 text-foreground">
-                          {new Date(pdfContextBanner.context.appliedAt).toLocaleString()}
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-                {visibleBannerQuestions.length > 0 && (
-                  <div className="mt-3">
-                    <div className="mb-2 flex items-center gap-1 text-[11px] text-muted-foreground">
-                      <Sparkles className="h-3 w-3 text-primary" />
-                      추천 질문
+                {isCohortContextExpanded ? (
+                  <>
+                    <div className="overflow-x-auto rounded-md border border-border/70 bg-background/90">
+                      <table className="w-full min-w-[460px] text-xs">
+                        <tbody>
+                          <tr className="border-b border-border/70">
+                            <th className="w-36 bg-muted/40 px-3 py-2 text-left font-medium text-muted-foreground">대상 환자 수</th>
+                            <td className="px-3 py-2 text-foreground">
+                              {pdfContextBanner.context.cohortSize != null
+                                ? `${pdfContextBanner.context.cohortSize.toLocaleString()}명`
+                                : "-"}
+                            </td>
+                          </tr>
+                          <tr className="border-b border-border/70">
+                            <th className="bg-muted/40 px-3 py-2 text-left font-medium text-muted-foreground">핵심 변수</th>
+                            <td className="px-3 py-2 text-foreground">
+                              {(() => {
+                                const vars = Array.isArray(pdfContextBanner.context?.keyVariables)
+                                  ? pdfContextBanner.context.keyVariables
+                                  : []
+                                if (!vars.length) return "-"
+                                const preview = vars.slice(0, 3).join(", ")
+                                const remains = Math.max(0, vars.length - 3)
+                                return remains > 0 ? `${preview} +${remains} more` : preview
+                              })()}
+                            </td>
+                          </tr>
+                          <tr className="border-b border-border/70">
+                            <th className="bg-muted/40 px-3 py-2 text-left font-medium text-muted-foreground">코호트 기준 요약</th>
+                            <td className="px-3 py-2 text-foreground">
+                              {activeCohortContext.criteriaSummaryKo || activeCohortContext.summaryKo || "-"}
+                            </td>
+                          </tr>
+                          <tr>
+                            <th className="bg-muted/40 px-3 py-2 text-left font-medium text-muted-foreground">적용 시각</th>
+                            <td className="px-3 py-2 text-foreground">
+                              {new Date(pdfContextBanner.context.appliedAt).toLocaleString()}
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
                     </div>
-                    <div className="flex flex-wrap gap-2">
-                      {visibleBannerQuestions.slice(0, 3).map((item) => (
-                        <Button
-                          key={`banner-cohort-question-${item}`}
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="h-auto min-h-7 max-w-full rounded-full bg-background/80 px-2.5 py-1.5 text-left text-[11px] leading-4 whitespace-normal break-words"
-                          onClick={() => handleQuickQuestion(item)}
-                          disabled={isLoading}
-                        >
-                          {item}
-                        </Button>
-                      ))}
-                    </div>
+                  </>
+                ) : (
+                  <div className="rounded-md border border-dashed border-border/70 bg-background/80 px-3 py-2 text-[12px] text-muted-foreground">
+                    코호트 컨텍스트 정보를 숨긴 상태입니다. 상세 정보 확인을 눌러 확인할 수 있습니다.
                   </div>
                 )}
               </div>
@@ -5012,33 +5273,47 @@ export function QueryView() {
           {/* Messages */}
           <div ref={chatScrollRef} className="flex-1 overflow-y-auto p-4 space-y-4">
             {messages.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full text-center">
-                <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mb-4">
-                  <Send className="w-6 h-6 text-primary" />
-                </div>
-                <h3 className="font-medium text-foreground mb-2">질문을 입력하세요</h3>
-                <p className="text-sm text-muted-foreground max-w-sm">
-                  {activeCohortContext
-                    ? "상단 코호트 요약 표를 확인한 뒤 바로 질문할 수 있습니다."
-                    : '예: "65세 이상 환자 코호트를 만들고 생존 곡선을 보여줘"'}
-                </p>
-                {visibleQuickQuestions.length > 0 && (
-                  <div className="mt-4 flex flex-col gap-2 w-full max-w-sm">
-                    {visibleQuickQuestions.map((item) => (
-                      <Button
-                        key={item}
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => handleQuickQuestion(item)}
-                        disabled={isLoading}
-                        className="h-auto min-h-8 w-full justify-start whitespace-normal break-words py-2 text-left text-xs"
-                      >
-                        {item}
-                      </Button>
-                    ))}
+              showCenteredOnboarding ? (
+                <div className="flex h-full flex-col items-center justify-center px-4 text-center">
+                  <div className="w-full max-w-4xl space-y-5">
+                    <h2 className="text-xl font-semibold tracking-tight text-foreground md:text-3xl">
+                      <span className="underline decoration-primary/40 underline-offset-4">{chatUser}</span> 연구원님, 어떤 데이터를 확인하고 싶으신가요?
+                    </h2>
+                    <p className="text-sm text-muted-foreground md:text-base">
+                      환자군, 기간, 지표를 자연어로 입력하면 SQL과 결과를 바로 확인할 수 있습니다.
+                    </p>
+                    {renderChatInputComposer({ centered: true })}
                   </div>
-                )}
-              </div>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center h-full text-center">
+                  <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+                    <Send className="w-6 h-6 text-primary" />
+                  </div>
+                  <h3 className="font-medium text-foreground mb-2">질문을 입력하세요</h3>
+                  <p className="text-sm text-muted-foreground max-w-sm">
+                    {activeCohortContext
+                      ? "상단 코호트 요약 표를 확인한 뒤 바로 질문할 수 있습니다."
+                      : '예: "65세 이상 환자 코호트를 만들고 생존 곡선을 보여줘"'}
+                  </p>
+                  {visibleQuickQuestions.length > 0 && !shouldHideInlineQuickQuestions && (
+                    <div className="mt-4 flex flex-col gap-2 w-full max-w-sm">
+                      {visibleQuickQuestions.map((item) => (
+                        <Button
+                          key={item}
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => handleQuickQuestion(item)}
+                          disabled={isLoading}
+                          className="h-auto min-h-8 w-full justify-start whitespace-normal break-words py-2 text-left text-xs"
+                        >
+                          {item}
+                        </Button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
             ) : (
               messages.map((message, idx) => {
                 const messageCopyKey = `${message.id}-${message.role}-${idx}`
@@ -5053,7 +5328,7 @@ export function QueryView() {
                     isUser ? "items-end" : "items-start"
                   )}>
                     {isUser ? (
-                      <div className="group flex max-w-[85%] items-end gap-1">
+                      <div className="group flex max-w-[88%] items-end gap-1 md:max-w-[78%]">
                         <div className="flex shrink-0 items-center gap-0.5 pb-0.5 opacity-100 transition-opacity md:pointer-events-none md:opacity-0 md:group-hover:pointer-events-auto md:group-hover:opacity-100 md:group-focus-within:pointer-events-auto md:group-focus-within:opacity-100">
                           <Button
                             type="button"
@@ -5096,7 +5371,7 @@ export function QueryView() {
                         </div>
                       </div>
                     ) : (
-                      <div className="group flex max-w-[80%] items-end gap-1">
+                      <div className="group flex max-w-[88%] items-end gap-1 md:max-w-[74%]">
                         <div className="rounded-lg bg-secondary p-3">
                           <p className="text-sm whitespace-pre-line break-words">{message.content}</p>
                           <span className="mt-1 block text-[10px] opacity-70">
@@ -5126,7 +5401,7 @@ export function QueryView() {
                       </div>
                     )}
                     {showSuggestions && (
-                      <div className="mt-2 max-w-[80%] rounded-lg border border-border/60 bg-secondary/40 p-2">
+                      <div className="mt-2 max-w-[88%] rounded-lg border border-border/60 bg-secondary/40 p-2 md:max-w-[74%]">
                         <div className="mb-2 flex items-center gap-1 text-[10px] text-muted-foreground">
                           <Sparkles className="h-3 w-3 text-primary" />
                           추천 질문
@@ -5165,180 +5440,11 @@ export function QueryView() {
           </div>
 
           {/* Input */}
-          <div className="p-4 border-t border-border">
-            <div className="rounded-2xl border border-border bg-card px-2.5 py-2 shadow-xs">
-              {activeCohortContext && (
-                <div className="mb-2 flex items-center justify-between gap-2 rounded-xl border border-primary/25 bg-primary/5 px-2.5 py-2">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5 text-[11px] font-medium text-primary">
-                      <FileText className="h-3.5 w-3.5" />
-                      코호트 컨텍스트 적용됨
-                    </div>
-                    <p className="truncate text-[11px] text-muted-foreground">
-                      {activeCohortContext.filename || activeCohortContext.cohortName}
-                    </p>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 px-2 text-[11px]"
-                    onClick={clearActiveCohortContext}
-                  >
-                    해제
-                  </Button>
-                </div>
-              )}
-              <Textarea
-                placeholder="자연어로 질문하세요..."
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                className="min-h-[64px] resize-none border-0 bg-transparent px-1 py-1.5 text-sm shadow-none focus-visible:ring-0"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault()
-                    handleSubmit()
-                  }
-                }}
-              />
-              <div className="mt-2 flex items-center justify-between gap-2">
-                <div className="flex min-w-0 items-center gap-1">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    className="h-8 w-8 rounded-full"
-                    title="코호트 라이브러리 열기"
-                    aria-label="코호트 라이브러리 열기"
-                    onClick={() => {
-                      void loadSavedCohortLibrary()
-                      setIsCohortLibraryOpen(true)
-                    }}
-                  >
-                    <Plus className="h-4 w-4" />
-                  </Button>
-                  <Select value={selectedModel} onValueChange={setSelectedModel}>
-                    <SelectTrigger className="h-8 w-[152px] rounded-full border-border/70 bg-background text-xs">
-                      <SelectValue placeholder="모델 선택" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {modelOptions.map((model) => (
-                        <SelectItem key={model} value={model}>
-                          {model}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <div className="relative">
-                    {isVoiceModeOn && (
-                      <span className="pointer-events-none absolute inset-0 rounded-full border border-primary/70 animate-ping" />
-                    )}
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      className={cn(
-                        "relative h-8 w-8 rounded-full transition-colors",
-                        isVoiceModeOn && "bg-primary/10 text-primary",
-                        isVoiceTranscribing && "bg-primary/10 text-primary"
-                      )}
-                      title={
-                        isVoiceTranscribing
-                          ? "음성 변환 중"
-                          : isVoiceModeOn
-                            ? "음성 입력 중지"
-                            : "음성 입력 시작"
-                      }
-                      aria-label={
-                        isVoiceTranscribing
-                          ? "음성 변환 중"
-                          : isVoiceModeOn
-                            ? "음성 입력 중지"
-                            : "음성 입력 시작"
-                      }
-                      onClick={handleToggleVoiceInput}
-                      disabled={!isSpeechSupported || isVoiceTranscribing || isVoiceModeOn}
-                    >
-                      {isVoiceTranscribing ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Mic className="h-4 w-4" />
-                      )}
-                    </Button>
-                  </div>
-                </div>
-                <Button
-                  onClick={handleSubmit}
-                  disabled={isLoading || isVoiceModeOn || isVoiceTranscribing || !query.trim()}
-                  className="h-9 w-9 rounded-full p-0"
-                  title="전송"
-                  aria-label="전송"
-                >
-                  <Send className="h-4 w-4" />
-                </Button>
-              </div>
-              {isVoiceModeOn && (
-                <div className="mt-2 flex items-center gap-2 rounded-full border border-border bg-card/95 px-2 py-1.5 text-foreground shadow-sm">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    onClick={handleCancelVoiceInput}
-                    className="h-9 w-9 rounded-full border border-border bg-secondary text-secondary-foreground hover:bg-secondary/80"
-                    title="녹음 취소"
-                    aria-label="녹음 취소"
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                  <div className="min-w-0 flex-1 px-1">
-                    <div className="h-7 overflow-hidden rounded-full border border-border/70 bg-muted/30 px-2">
-                      <div className="flex h-full items-center gap-[3px]">
-                        {voiceWaveLevels.map((level, idx) => (
-                          <span
-                            key={`voice-wave-${idx}`}
-                            className="w-[2px] rounded-full bg-primary transition-[height,opacity] duration-75 ease-out"
-                            style={{
-                              height: `${4 + Math.round(level * 18)}px`,
-                              opacity: 0.2 + Math.min(0.8, level),
-                            }}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                  <span className="w-11 text-right text-lg font-semibold tabular-nums tracking-tight text-foreground">
-                    {formatVoiceElapsed(voiceElapsedMs)}
-                  </span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    onClick={handleConfirmVoiceInput}
-                    className="h-9 w-9 rounded-full bg-primary text-primary-foreground hover:bg-primary/90"
-                    title="녹음 확정"
-                    aria-label="녹음 확정"
-                    disabled={!isListening}
-                  >
-                    <Check className="h-4 w-4" />
-                  </Button>
-                </div>
-              )}
-              {isVoiceTranscribing && (
-                <div className="mt-2 flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-2 py-1.5 text-[11px] text-primary">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  <span className="font-medium">음성 변환 중...</span>
-                  <span className="min-w-0 truncate text-muted-foreground">
-                    {voiceInterimText || "녹음된 음성을 텍스트로 변환하고 있습니다."}
-                  </span>
-                </div>
-              )}
-              {!isSpeechSupported && (
-                <div className="mt-2 px-1 text-[11px] text-muted-foreground">
-                  이 브라우저는 음성 녹음을 지원하지 않습니다.
-                </div>
-              )}
+          {!showCenteredOnboarding && (
+            <div className="p-4 border-t border-border">
+              {renderChatInputComposer()}
             </div>
-          </div>
+          )}
         </div>
 
         {shouldShowResizablePanels && (
@@ -5644,7 +5750,7 @@ export function QueryView() {
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm">통계 자료</CardTitle>
-                  <CardDescription className="text-xs">컬럼별 MIN, Q1, 중앙값, Q3, MAX, 평균, 결측치, NULL 개수</CardDescription>
+                  <CardDescription className="text-xs">컬럼별 MIN, Q1, 중앙값, Q3, MAX, 평균, NULL 개수</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   {previewColumns.length ? (
@@ -5655,7 +5761,6 @@ export function QueryView() {
                             <tr>
                               <th className="text-left p-2 font-medium">컬럼</th>
                               <th className="text-right p-2 font-medium">N</th>
-                              <th className="text-right p-2 font-medium">결측치</th>
                               <th className="text-right p-2 font-medium">NULL</th>
                               <th className="text-right p-2 font-medium">MIN</th>
                               <th className="text-right p-2 font-medium">Q1</th>
@@ -5670,7 +5775,6 @@ export function QueryView() {
                               <tr key={row.column} className="border-t border-border">
                                 <td className="p-2 font-medium">{row.column}</td>
                                 <td className="p-2 text-right">{row.count}</td>
-                                <td className="p-2 text-right">{row.missingCount}</td>
                                 <td className="p-2 text-right">{row.nullCount}</td>
                                 <td className="p-2 text-right">{formatStatNumber(row.min)}</td>
                                 <td className="p-2 text-right">{formatStatNumber(row.q1)}</td>
@@ -6469,3 +6573,4 @@ function escapeHtml(value: string) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
 }
+

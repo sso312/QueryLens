@@ -108,6 +108,12 @@ export default function Home() {
     const base = (user?.name || "").trim()
     return base ? base.charAt(0) : "?"
   }, [user?.name])
+  const userRoleLine = useMemo(() => {
+    const role = String(user?.role || "").trim()
+    const department = String(user?.department || "").trim()
+    if (role && department) return `${role} · ${department}`
+    return role || department || "사용자"
+  }, [user?.role, user?.department])
 
   const handleLogout = () => {
     logout()
@@ -233,7 +239,7 @@ export default function Home() {
                   </div>
                   <div className="hidden sm:block text-left">
                     <div className="text-sm font-medium text-foreground">{user.name}</div>
-                    <div className="text-[10px] text-muted-foreground">{user.role}</div>
+                    <div className="text-[10px] text-muted-foreground">{userRoleLine}</div>
                   </div>
                 </button>
               </DropdownMenuTrigger>
@@ -244,7 +250,7 @@ export default function Home() {
                   </div>
                   <div className="min-w-0">
                     <div className="text-sm font-medium text-foreground truncate">{user.name}</div>
-                    <div className="text-[10px] text-muted-foreground">{user.role}</div>
+                    <div className="text-[10px] text-muted-foreground">{userRoleLine}</div>
                   </div>
                 </div>
                 <DropdownMenuSeparator />

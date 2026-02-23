@@ -12,6 +12,12 @@ import time
 import re
 import math
 import tempfile
+try:
+    from sqlglot import exp as sqlglot_exp
+    from sqlglot import parse_one as sqlglot_parse_one
+except Exception:  # pragma: no cover - optional dependency in some local envs
+    sqlglot_exp = None
+    sqlglot_parse_one = None
 
 from app.services.agents.orchestrator import run_oneshot
 from app.services.agents.llm_client import LLMClient
@@ -87,6 +93,9 @@ _FOLLOWUP_QUERY_HINT_RE = re.compile(
     r"\b(then|previous|above|same condition|based on that|what about that)\b)",
     re.IGNORECASE,
 )
+_COHORT_JOIN_KEYS = ("SUBJECT_ID", "HADM_ID", "STAY_ID")
+_SAFE_ORACLE_IDENTIFIER_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_$#]*$")
+_TABLE_COLUMN_EXISTS_CACHE: dict[tuple[str, str, str], bool] = {}
 
 
 class OneShotRequest(BaseModel):
@@ -459,11 +468,223 @@ def _probe_sql_columns(sql: str) -> set[str]:
     return {str(col or "").strip().upper() for col in columns if str(col or "").strip()}
 
 
+def _normalize_upper_identifier(value: str | None) -> str:
+    text = str(value or "").strip()
+    if text.startswith('"') and text.endswith('"') and len(text) >= 2:
+        text = text[1:-1]
+    return text.upper()
+
+
+def _is_safe_oracle_identifier(value: str | None) -> bool:
+    return bool(_SAFE_ORACLE_IDENTIFIER_RE.fullmatch(str(value or "").strip()))
+
+
+def _oracle_identifier_sql(value: str) -> str:
+    token = str(value or "").strip()
+    if not token:
+        return ""
+    if _is_safe_oracle_identifier(token):
+        return token
+    escaped = token.replace('"', '""')
+    return f'"{escaped}"'
+
+
+def _table_has_column(*, table_name: str, column_name: str, owner: str | None = None) -> bool:
+    normalized_table = _normalize_upper_identifier(table_name)
+    normalized_column = _normalize_upper_identifier(column_name)
+    normalized_owner = _normalize_upper_identifier(owner)
+    if not normalized_table or not normalized_column:
+        return False
+    if not _is_safe_oracle_identifier(normalized_table):
+        return False
+    if not _is_safe_oracle_identifier(normalized_column):
+        return False
+    if normalized_owner and not _is_safe_oracle_identifier(normalized_owner):
+        return False
+
+    cache_key = (normalized_owner, normalized_table, normalized_column)
+    cached = _TABLE_COLUMN_EXISTS_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    owner_clause = f" AND OWNER = '{normalized_owner}'" if normalized_owner else ""
+    probe_sql = (
+        "SELECT 1 AS HIT "
+        "FROM ALL_TAB_COLUMNS "
+        f"WHERE TABLE_NAME = '{normalized_table}' "
+        f"AND COLUMN_NAME = '{normalized_column}'"
+        f"{owner_clause} "
+        "FETCH FIRST 1 ROWS ONLY"
+    )
+    exists = False
+    try:
+        probe_result = execute_sql(probe_sql)
+        exists = int(probe_result.get("row_count") or 0) > 0 if isinstance(probe_result, dict) else False
+    except Exception:
+        exists = False
+    _TABLE_COLUMN_EXISTS_CACHE[cache_key] = exists
+    return exists
+
+
+def _collect_select_table_refs(select_expr: Any) -> list[dict[str, str | None]]:
+    if sqlglot_exp is None or not isinstance(select_expr, sqlglot_exp.Select):
+        return []
+
+    refs: list[dict[str, str | None]] = []
+    seen: set[tuple[str, str, str]] = set()
+
+    def append_source(source_expr: Any) -> None:
+        if sqlglot_exp is None or not isinstance(source_expr, sqlglot_exp.Table):
+            return
+        alias = str(source_expr.alias_or_name or "").strip()
+        table_name = str(source_expr.name or "").strip()
+        owner = str(source_expr.db or "").strip() or None
+        if not alias or not table_name:
+            return
+        key = (
+            alias.upper(),
+            _normalize_upper_identifier(owner),
+            _normalize_upper_identifier(table_name),
+        )
+        if key in seen:
+            return
+        seen.add(key)
+        refs.append({
+            "alias": alias,
+            "table_name": table_name,
+            "owner": owner,
+        })
+
+    from_clause = select_expr.args.get("from")
+    if sqlglot_exp is not None and isinstance(from_clause, sqlglot_exp.From):
+        from_sources = list(from_clause.expressions or [])
+        if not from_sources and from_clause.this is not None:
+            from_sources = [from_clause.this]
+        for source_expr in from_sources:
+            append_source(source_expr)
+
+    join_exprs = select_expr.args.get("joins") or []
+    if isinstance(join_exprs, list):
+        for join_expr in join_exprs:
+            if sqlglot_exp is None or not isinstance(join_expr, sqlglot_exp.Join):
+                continue
+            append_source(join_expr.this)
+
+    return refs
+
+
+def _compose_cohort_scoped_sql_from_table_keys(
+    base_sql: str,
+    cohort_sql: str,
+) -> tuple[str, dict[str, Any] | None]:
+    clean_base = _strip_terminal_semicolon(base_sql)
+    clean_cohort = _normalize_cohort_sql(cohort_sql)
+    if not clean_base or not clean_cohort:
+        return clean_base, None
+    if sqlglot_exp is None or sqlglot_parse_one is None:
+        return clean_base, None
+
+    cohort_cols = _probe_sql_columns(clean_cohort)
+    candidate_keys = [key for key in _COHORT_JOIN_KEYS if key in cohort_cols]
+    if not candidate_keys:
+        return clean_base, None
+
+    try:
+        parsed = sqlglot_parse_one(clean_base, read="oracle")
+    except Exception:
+        return clean_base, None
+
+    if not isinstance(parsed, sqlglot_exp.Select):
+        return clean_base, None
+    table_refs = _collect_select_table_refs(parsed)
+    if not table_refs:
+        return clean_base, None
+
+    selected_key = ""
+    selected_alias = ""
+    selected_table = ""
+    selected_owner: str | None = None
+    for key in candidate_keys:
+        for ref in table_refs:
+            table_name = str(ref.get("table_name") or "").strip()
+            if not table_name:
+                continue
+            owner = str(ref.get("owner") or "").strip() or None
+            if _table_has_column(table_name=table_name, column_name=key, owner=owner):
+                selected_key = key
+                selected_alias = str(ref.get("alias") or "").strip()
+                selected_table = table_name
+                selected_owner = owner
+                break
+        if selected_key:
+            break
+
+    if not selected_key or not selected_alias:
+        return clean_base, None
+
+    key_sql = _oracle_identifier_sql(selected_key)
+    alias_sql = _oracle_identifier_sql(selected_alias)
+    if not key_sql or not alias_sql:
+        return clean_base, None
+
+    predicate_sql = (
+        "EXISTS ("
+        "SELECT 1 "
+        f"FROM ({clean_cohort}) ql_scope_cohort "
+        f"WHERE ql_scope_cohort.{key_sql} IS NOT NULL "
+        f"AND {alias_sql}.{key_sql} = ql_scope_cohort.{key_sql}"
+        ")"
+    )
+    try:
+        predicate_wrapper = sqlglot_parse_one(
+            f"SELECT 1 FROM DUAL WHERE {predicate_sql}",
+            read="oracle",
+        )
+    except Exception:
+        return clean_base, None
+
+    predicate_expr = None
+    if isinstance(predicate_wrapper, sqlglot_exp.Select):
+        where_clause = predicate_wrapper.args.get("where")
+        if isinstance(where_clause, sqlglot_exp.Where):
+            predicate_expr = where_clause.this
+    if predicate_expr is None:
+        return clean_base, None
+
+    existing_where = parsed.args.get("where")
+    if isinstance(existing_where, sqlglot_exp.Where) and existing_where.this is not None:
+        parsed.set("where", sqlglot_exp.Where(this=sqlglot_exp.and_(existing_where.this, predicate_expr)))
+    else:
+        parsed.set("where", sqlglot_exp.Where(this=predicate_expr))
+
+    try:
+        scoped_sql = _strip_terminal_semicolon(parsed.sql(dialect="oracle"))
+    except Exception:
+        return clean_base, None
+    if not scoped_sql:
+        return clean_base, None
+
+    return scoped_sql, {
+        "join_key": selected_key,
+        "scope_mode": "table_columns",
+        "base_alias": selected_alias,
+        "base_table": selected_table,
+        "base_owner": selected_owner,
+    }
+
+
 def _compose_cohort_scoped_sql(base_sql: str, cohort_sql: str) -> tuple[str, dict[str, Any] | None]:
     clean_base = _strip_terminal_semicolon(base_sql)
     clean_cohort = _normalize_cohort_sql(cohort_sql)
     if not clean_base or not clean_cohort:
         return clean_base, None
+
+    table_scoped_sql, table_scope_meta = _compose_cohort_scoped_sql_from_table_keys(
+        clean_base,
+        clean_cohort,
+    )
+    if table_scope_meta:
+        return table_scoped_sql, table_scope_meta
 
     base_cols = _probe_sql_columns(clean_base)
     cohort_cols = _probe_sql_columns(clean_cohort)
@@ -507,7 +728,7 @@ def _compose_cohort_scoped_sql(base_sql: str, cohort_sql: str) -> tuple[str, dic
         ") c "
         f"ON b.{join_key} = c.{join_key}"
     )
-    return scoped_sql, {"join_key": join_key}
+    return scoped_sql, {"join_key": join_key, "scope_mode": "result_columns"}
 
 
 def _build_cohort_context_prompt(

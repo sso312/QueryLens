@@ -35,6 +35,13 @@ const navItems = [
 ]
 
 export function AppSidebar({ currentView, onViewChange, collapsed, onToggleCollapse }: AppSidebarProps) {
+  const handleNavItemClick = (view: ViewType) => {
+    if (collapsed) {
+      onToggleCollapse()
+    }
+    onViewChange(view)
+  }
+
   return (
     <TooltipProvider delayDuration={0}>
       <aside className={cn(
@@ -70,7 +77,7 @@ export function AppSidebar({ currentView, onViewChange, collapsed, onToggleColla
             const button = (
               <button
                 key={item.id}
-                onClick={() => onViewChange(item.id)}
+                onClick={() => handleNavItemClick(item.id)}
                 className={cn(
                   "flex items-center w-full rounded-lg transition-colors",
                   collapsed ? "justify-center p-3" : "gap-3 px-3 py-2.5",

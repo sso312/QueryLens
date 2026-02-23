@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 from fastapi.testclient import TestClient
 
 from src.api.server import MAX_ROWS, app
@@ -59,3 +61,51 @@ def test_visualize_ignores_client_analysis_query(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert captured.get("analysis_query", "sentinel") is None
+
+
+def test_visualize_sanitizes_non_finite_numbers(monkeypatch) -> None:
+    def _fake_analyze_and_visualize(
+        user_query: str,
+        sql: str,
+        df,
+        *,
+        analysis_query=None,
+        request_id=None,
+    ):
+        return {
+            "sql": sql,
+            "table_preview": [{"x": 1, "y": math.nan}],
+            "analyses": [
+                {
+                    "chart_spec": {"chart_type": "line", "x": "x", "y": "y"},
+                    "figure_json": {
+                        "data": [{"x": [1, 2], "y": [math.nan, 3]}],
+                        "layout": {"title": "demo"},
+                    },
+                    "reason": "테스트",
+                }
+            ],
+            "insight": "ok",
+            "fallback_used": False,
+            "failure_reasons": [],
+            "attempt_count": 1,
+            "request_id": request_id,
+            "stage_latency_ms": {},
+        }
+
+    monkeypatch.setattr(
+        "src.agent.analysis_agent.analyze_and_visualize",
+        _fake_analyze_and_visualize,
+    )
+
+    payload = {
+        "user_query": "테스트",
+        "sql": "SELECT 1 x, 2 y FROM dual",
+        "rows": [{"x": 1, "y": 2}],
+    }
+    response = client.post("/visualize", json=payload)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["table_preview"][0]["y"] is None
+    assert body["analyses"][0]["figure_json"]["data"][0]["y"][0] is None

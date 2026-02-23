@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import math
 from typing import Any, Dict, List
 
 import pandas as pd
@@ -59,6 +60,22 @@ class VisualizeRequest(BaseModel):
     rows: List[Dict[str, Any]]
 
 
+def _sanitize_non_finite(value: Any) -> Any:
+    if isinstance(value, bool) or value is None:
+        return value
+    if isinstance(value, (int, float)):
+        try:
+            numeric = float(value)
+        except Exception:
+            return value
+        return value if math.isfinite(numeric) else None
+    if isinstance(value, dict):
+        return {str(k): _sanitize_non_finite(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_non_finite(item) for item in value]
+    return value
+
+
 def _validate_payload(req: VisualizeRequest) -> None:
     if len(req.rows) > MAX_ROWS:
         raise HTTPException(
@@ -113,10 +130,17 @@ def visualize(req: VisualizeRequest) -> VisualizationResponse:
             detail={"code": "ANALYSIS_IMPORT_ERROR", "message": "analysis agent import failed"},
         ) from exc
 
-    return analyze_and_visualize(
+    result = analyze_and_visualize(
         req.user_query,
         req.sql,
         df,
         analysis_query=None,
         request_id=request_id,
     )
+    try:
+        raw_payload = result.model_dump() if hasattr(result, "model_dump") else result
+        payload = _sanitize_non_finite(raw_payload)
+        return VisualizationResponse.model_validate(payload)
+    except Exception:
+        # Fail-safe: if sanitation/validation unexpectedly fails, return original response.
+        return result

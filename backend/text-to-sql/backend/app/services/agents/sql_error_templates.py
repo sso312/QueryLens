@@ -75,6 +75,106 @@ def _replace_alias_col(sql: str, aliases: set[str], source_col: str, target_col:
     return text
 
 
+def _find_projection_expr_for_alias(sql: str, alias: str) -> str | None:
+    """
+    Best-effort extractor for simple aggregate projection aliases such as:
+    COUNT(*) AS CNT, SUM(...) AS CNT, AVG(...) AS CNT.
+    """
+    target = str(alias or "").strip().upper()
+    if not target:
+        return None
+    text = str(sql or "")
+    pattern = re.compile(
+        rf"(?is)\b(?P<expr>"
+        r"COUNT\s*\(\s*DISTINCT\s+[^)]+\)"
+        r"|COUNT\s*\([^)]*\)"
+        r"|SUM\s*\([^)]*\)"
+        r"|AVG\s*\([^)]*\)"
+        r"|MIN\s*\([^)]*\)"
+        r"|MAX\s*\([^)]*\)"
+        rf")\s+AS\s+{re.escape(target)}\b",
+        re.IGNORECASE,
+    )
+    match = pattern.search(text)
+    if not match:
+        return None
+    expr = str(match.group("expr") or "").strip()
+    return expr or None
+
+
+def _collect_projection_alias_exprs(sql: str) -> dict[str, str]:
+    text = str(sql or "")
+    pattern = re.compile(
+        r"(?is)\b(?P<expr>"
+        r"COUNT\s*\(\s*DISTINCT\s+[^)]+\)"
+        r"|COUNT\s*\([^)]*\)"
+        r"|SUM\s*\([^)]*\)"
+        r"|AVG\s*\([^)]*\)"
+        r"|MIN\s*\([^)]*\)"
+        r"|MAX\s*\([^)]*\)"
+        r")\s+AS\s+(?P<alias>[A-Za-z_][A-Za-z0-9_$#]*)\b",
+        re.IGNORECASE,
+    )
+    result: dict[str, str] = {}
+    for match in pattern.finditer(text):
+        alias = str(match.group("alias") or "").strip().upper()
+        expr = str(match.group("expr") or "").strip()
+        if not alias or not expr or alias in result:
+            continue
+        result[alias] = expr
+    return result
+
+
+def _replace_alias_reference_with_expr(sql: str, alias: str, expr: str) -> tuple[str, bool]:
+    """
+    Replace bare alias references (not quoted) with the original expression.
+    Keeps alias declarations (AS <alias>) intact via temporary placeholder.
+    """
+    text = str(sql or "")
+    alias_token = str(alias or "").strip()
+    expr_token = str(expr or "").strip()
+    if not text or not alias_token or not expr_token:
+        return text, False
+
+    placeholder = "__QL_ALIAS_PLACEHOLDER__"
+    protected = re.sub(
+        rf"\bAS\s+{re.escape(alias_token)}\b",
+        f"AS {placeholder}",
+        text,
+        flags=re.IGNORECASE,
+    )
+    rewritten = re.sub(
+        rf"(?<!\")\b{re.escape(alias_token)}\b(?!\")",
+        f"({expr_token})",
+        protected,
+        flags=re.IGNORECASE,
+    )
+    rewritten = rewritten.replace(placeholder, alias_token)
+    return rewritten, rewritten != text
+
+
+def _inline_projection_alias_references(sql: str, *, only_alias: str | None = None) -> tuple[str, list[str]]:
+    text = str(sql or "")
+    alias_exprs = _collect_projection_alias_exprs(text)
+    if not alias_exprs:
+        return text, []
+
+    target = str(only_alias or "").strip().upper()
+    if target:
+        alias_exprs = {k: v for k, v in alias_exprs.items() if k == target}
+        if not alias_exprs:
+            return text, []
+
+    changed_aliases: list[str] = []
+    rewritten = text
+    for alias, expr in alias_exprs.items():
+        updated, changed = _replace_alias_reference_with_expr(rewritten, alias, expr)
+        if changed:
+            rewritten = updated
+            changed_aliases.append(alias)
+    return rewritten, changed_aliases
+
+
 def _strip_top_level_order_by(sql: str) -> tuple[str, bool]:
     text = str(sql or "").strip().rstrip(";")
     if not text:
@@ -242,6 +342,24 @@ def _repair_invalid_identifier(sql: str, error_message: str) -> tuple[str, list[
             if rewritten != text:
                 text = rewritten
                 rules.append("template_00904_generic_medication_to_drug")
+
+        # 7-b) Generic same-SELECT alias reuse fallback:
+        # e.g., SELECT SUM(...) AS DEATH_CNT, ROUND(DEATH_CNT / ...) ...
+        # Apply for the failing alias and inline related aggregate aliases in one pass.
+        inline_rewritten, changed_aliases = _inline_projection_alias_references(
+            text,
+            only_alias=err_col,
+        )
+        if changed_aliases:
+            text = inline_rewritten
+            all_rewritten, all_changed_aliases = _inline_projection_alias_references(text)
+            if all_changed_aliases:
+                text = all_rewritten
+                changed_aliases = list(dict.fromkeys([*changed_aliases, *all_changed_aliases]))
+            rules.append(
+                "template_00904_alias_inline_expr_fix:"
+                + ",".join(alias.lower() for alias in changed_aliases[:6])
+            )
 
         # 8) Outer aggregate references missing alias while inner projection uses CNT.
         if err_col in {"PROCEDURE_COUNT", "DIAGNOSIS_COUNT", "AVERAGE_VALUE"}:

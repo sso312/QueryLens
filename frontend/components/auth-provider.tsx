@@ -7,6 +7,7 @@ export type AuthUser = {
   username: string
   name: string
   role: string
+  department?: string
 }
 
 type LoginInput = {
@@ -19,6 +20,7 @@ type RegisterInput = {
   password: string
   name: string
   role?: string
+  department?: string
 }
 
 type StoredUser = AuthUser & {
@@ -37,8 +39,22 @@ const AUTH_STORAGE_KEY = "querylens.auth.user"
 const AUTH_USERS_STORAGE_KEY = "querylens.auth.users"
 
 const DEMO_USERS: StoredUser[] = [
-  { id: "user-researcher-01", username: "researcher_01", password: "team9KDT__2026", name: "김연구원", role: "연구원" },
-  { id: "user-admin-01", username: "admin_01", password: "admin1234", name: "박교수", role: "관리자" },
+  {
+    id: "user-researcher-01",
+    username: "researcher_01",
+    password: "team9KDT__2026",
+    name: "김연구원",
+    role: "연구원",
+    department: "임상연구팀",
+  },
+  {
+    id: "user-admin-01",
+    username: "admin_01",
+    password: "admin1234",
+    name: "박교수",
+    role: "관리자",
+    department: "관리부",
+  },
 ]
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined)
@@ -52,6 +68,7 @@ const sanitizeAuthUser = (value: unknown): AuthUser | null => {
     username: String(user.username),
     name: String(user.name),
     role: String(user.role),
+    department: String(user.department || "").trim() || undefined,
   }
 }
 
@@ -67,6 +84,7 @@ const sanitizeStoredUsers = (value: unknown): StoredUser[] => {
       username: String(row.username),
       name: String(row.name),
       role: String(row.role),
+      department: String(row.department || "").trim() || undefined,
       password: String(row.password),
     })
   }
@@ -145,16 +163,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       username: matched.username,
       name: matched.name,
       role: matched.role,
+      department: matched.department,
     }
     setUser(nextUser)
     localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(nextUser))
     return { ok: true }
   }, [users])
 
-  const register = useCallback(async ({ username, password, name, role }: RegisterInput) => {
+  const register = useCallback(async ({ username, password, name, role, department }: RegisterInput) => {
     const normalized = username.trim().toLowerCase()
     const nextName = name.trim()
     const nextRole = (role || "연구원").trim() || "연구원"
+    const nextDepartment = (department || "").trim()
 
     if (!normalized || normalized.length < 4) {
       return { ok: false, error: "아이디는 4자 이상이어야 합니다." }
@@ -164,6 +184,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     if (!nextName) {
       return { ok: false, error: "이름을 입력해 주세요." }
+    }
+    if (!nextDepartment) {
+      return { ok: false, error: "부서를 입력해 주세요." }
     }
     if (users.some((item) => item.username.toLowerCase() === normalized)) {
       return { ok: false, error: "이미 사용 중인 아이디입니다." }
@@ -175,10 +198,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       password,
       name: nextName,
       role: nextRole,
+      department: nextDepartment,
     }
     const nextUsers = [...users, created]
     setUsers(nextUsers)
     saveStoredUsers(nextUsers)
+    const nextUser: AuthUser = {
+      id: created.id,
+      username: created.username,
+      name: created.name,
+      role: created.role,
+      department: created.department,
+    }
+    setUser(nextUser)
+    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(nextUser))
     return { ok: true }
   }, [users])
 

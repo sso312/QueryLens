@@ -20,6 +20,7 @@ export default function LoginPage() {
   const [password, setPassword] = useState("team9KDT__2026")
   const [name, setName] = useState("")
   const [role, setRole] = useState("연구원")
+  const [department, setDepartment] = useState("")
   const [passwordConfirm, setPasswordConfirm] = useState("")
 
   const [submitting, setSubmitting] = useState(false)
@@ -52,18 +53,12 @@ export default function LoginPage() {
       setError("비밀번호 확인이 일치하지 않습니다.")
       return
     }
-    const reg = await register({ username, password, name, role })
+    const reg = await register({ username, password, name, role, department })
     if (!reg.ok) {
       setError(reg.error || "회원가입에 실패했습니다.")
       return
     }
     setSuccess("회원가입이 완료되었습니다. 로그인 처리 중입니다.")
-    const result = await login({ username, password })
-    if (!result.ok) {
-      setMode("login")
-      setSuccess("회원가입이 완료되었습니다. 로그인해 주세요.")
-      return
-    }
     router.replace("/")
   }
 
@@ -189,6 +184,16 @@ export default function LoginPage() {
                     value={role}
                     onChange={(e) => setRole(e.target.value)}
                     placeholder="연구원"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="department">부서</Label>
+                  <Input
+                    id="department"
+                    value={department}
+                    onChange={(e) => setDepartment(e.target.value)}
+                    placeholder="임상연구팀"
+                    required
                   />
                 </div>
               </>

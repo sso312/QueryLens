@@ -11,3 +11,4 @@ pymongo==4.6.3
 pymupdf==1.23.26
 python-multipart==0.0.9
 pypdf==4.2.0
+sqlglot>=25.0.0,<26
