@@ -69,7 +69,7 @@ export type ActiveCohortContext = {
 export const PENDING_ACTIVE_COHORT_CONTEXT_KEY = "ql_pending_active_cohort_context"
 export const LEGACY_PENDING_PDF_COHORT_CONTEXT_KEY = "ql_pending_pdf_cohort_context"
 
-const COHORT_CONTEXT_SQL_LIMIT = 3200
+const COHORT_CONTEXT_SQL_LIMIT = 200000
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === "object" && !Array.isArray(value)

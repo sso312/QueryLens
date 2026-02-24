@@ -134,6 +134,15 @@ interface RunResponse {
   sql: string
   result: PreviewData
   policy?: PolicyResult | null
+  cohort?: {
+    applied?: boolean
+    cohort_id?: string | null
+    cohort_name?: string | null
+    cohort_type?: string | null
+    join_key?: string | null
+    reason?: string | null
+  }
+  base_sql?: string
 }
 
 interface QueryAnswerResponse {
@@ -287,7 +296,8 @@ const MAX_PERSIST_ROWS = 200
 const VIZ_CACHE_PREFIX = "viz_cache_v3:"
 const VIZ_CACHE_TTL_MS = 1000 * 60 * 60 * 24
 const PDF_CONTEXT_TABLE_ONCE_KEY_PREFIX = "ql_pdf_context_table_once"
-const COHORT_CONTEXT_SQL_LIMIT = 3200
+const COHORT_CONTEXT_SQL_LIMIT = 200000
+const LEGACY_COHORT_CONTEXT_SQL_LIMIT = 3200
 const CHART_CATEGORY_THRESHOLD = 10
 const CHART_CATEGORY_DEFAULT_COUNT = 10
 const BOX_PLOT_TRIGGER_MIN_W = 120
@@ -1624,6 +1634,11 @@ export function QueryView() {
     [statsRows]
   )
   const displaySql = (isEditing ? editedSql : runResult?.sql || currentSql) || ""
+  const shouldShowCohortScopeWarning = Boolean(
+    activeCohortContext &&
+    runResult?.cohort &&
+    runResult.cohort.applied === false
+  )
   useEffect(() => {
     setIsSqlCopied(false)
   }, [displaySql])
@@ -3572,11 +3587,46 @@ export function QueryView() {
     setIsCohortLibraryOpen(false)
   }
 
+  const maybeRefreshActiveCohortContext = async (
+    context: ActiveCohortContext | null
+  ): Promise<ActiveCohortContext | null> => {
+    if (!context) return context
+    const cohortId = String(context.cohortId || "").trim()
+    const cohortSql = String(context.cohortSql || "").trim()
+    if (!cohortId || !cohortSql) return context
+    const looksLegacyTruncated =
+      cohortSql.length >= LEGACY_COHORT_CONTEXT_SQL_LIMIT - 8 &&
+      cohortSql.length <= LEGACY_COHORT_CONTEXT_SQL_LIMIT
+    if (!looksLegacyTruncated) return context
+    try {
+      const res = await fetchWithTimeout(
+        apiUrlWithUser(`/cohort/library/${encodeURIComponent(cohortId)}`),
+        {},
+        8000
+      )
+      if (!res.ok) return context
+      const payload = await res.json()
+      const saved = toSavedCohort(payload)
+      if (!saved) return context
+      const refreshed = toActiveCohortContext(saved, "query-cohort-refresh")
+      if ((refreshed.cohortSql || "").length <= cohortSql.length) {
+        return context
+      }
+      activeCohortContextRef.current = refreshed
+      setActiveCohortContext(refreshed)
+      applyPdfContextBanner(refreshed)
+      return refreshed
+    } catch {
+      return context
+    }
+  }
+
   const runQuery = async (questionText: string) => {
     const trimmed = questionText.trim()
     if (!trimmed || isLoading || runQueryInFlightRef.current) return
     runQueryInFlightRef.current = true
-    const currentActiveContext = activeCohortContextRef.current
+    let currentActiveContext = activeCohortContextRef.current
+    currentActiveContext = await maybeRefreshActiveCohortContext(currentActiveContext)
 
     if (currentActiveContext) {
       markPdfContextTableAsShown(currentActiveContext)
@@ -4525,7 +4575,8 @@ export function QueryView() {
     addAssistantMessage?: boolean
     tabId?: string
   }) => {
-    const currentActiveContext = activeCohortContextRef.current
+    let currentActiveContext = activeCohortContextRef.current
+    currentActiveContext = await maybeRefreshActiveCohortContext(currentActiveContext)
     const clientRequestId = createClientRequestId()
     const body: Record<string, any> = {
       user_ack: true,
@@ -5608,6 +5659,11 @@ export function QueryView() {
                   </div>
                 </CardHeader>
                 <CardContent>
+                  {shouldShowCohortScopeWarning && (
+                    <div className="mb-3 rounded-md border border-amber-300/70 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                      코호트 컨텍스트를 SQL에 적용하지 못했습니다. 코호트 SQL과 조인 키(subject_id/hadm_id/stay_id)를 확인하세요.
+                    </div>
+                  )}
                   {isEditing ? (
                     <div className="space-y-3">
                       <Textarea

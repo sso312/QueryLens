@@ -94,6 +94,7 @@ _FOLLOWUP_QUERY_HINT_RE = re.compile(
     re.IGNORECASE,
 )
 _COHORT_JOIN_KEYS = ("SUBJECT_ID", "HADM_ID", "STAY_ID")
+_COHORT_JOIN_KEY_PRIORITY = ("STAY_ID", "HADM_ID", "SUBJECT_ID")
 _SAFE_ORACLE_IDENTIFIER_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_$#]*$")
 _TABLE_COLUMN_EXISTS_CACHE: dict[tuple[str, str, str], bool] = {}
 
@@ -573,6 +574,52 @@ def _collect_select_table_refs(select_expr: Any) -> list[dict[str, str | None]]:
     return refs
 
 
+def _candidate_cohort_join_keys(cohort_sql: str, cohort_cols: set[str] | None = None) -> list[str]:
+    normalized_cols = {str(col or "").strip().upper() for col in (cohort_cols or set()) if str(col or "").strip()}
+    if normalized_cols:
+        return [key for key in _COHORT_JOIN_KEYS if key in normalized_cols]
+    text = str(cohort_sql or "")
+    return [
+        key
+        for key in _COHORT_JOIN_KEYS
+        if re.search(rf"\b{re.escape(key)}\b", text, re.IGNORECASE)
+    ]
+
+
+def _prioritize_join_keys_for_sql(base_sql: str, candidate_keys: list[str]) -> list[str]:
+    keys = [str(key or "").strip().upper() for key in (candidate_keys or []) if str(key or "").strip()]
+    if not keys:
+        return []
+    unique_keys = list(dict.fromkeys(keys))
+    key_set = set(unique_keys)
+    text = str(base_sql or "")
+    mentioned = {
+        key
+        for key in unique_keys
+        if re.search(rf"\b{re.escape(key)}\b", text, re.IGNORECASE)
+    }
+    ordered: list[str] = []
+    for key in _COHORT_JOIN_KEY_PRIORITY:
+        if key in key_set and key in mentioned:
+            ordered.append(key)
+    for key in _COHORT_JOIN_KEY_PRIORITY:
+        if key in key_set and key not in ordered:
+            ordered.append(key)
+    for key in unique_keys:
+        if key not in ordered:
+            ordered.append(key)
+    return ordered
+
+
+def _sql_references_alias_column(sql: str, alias: str, column_name: str) -> bool:
+    alias_token = str(alias or "").strip()
+    column_token = str(column_name or "").strip()
+    if not alias_token or not column_token:
+        return False
+    pattern = rf"\b{re.escape(alias_token)}\s*\.\s*{re.escape(column_token)}\b"
+    return re.search(pattern, str(sql or ""), re.IGNORECASE) is not None
+
+
 def _compose_cohort_scoped_sql_from_table_keys(
     base_sql: str,
     cohort_sql: str,
@@ -585,7 +632,8 @@ def _compose_cohort_scoped_sql_from_table_keys(
         return clean_base, None
 
     cohort_cols = _probe_sql_columns(clean_cohort)
-    candidate_keys = [key for key in _COHORT_JOIN_KEYS if key in cohort_cols]
+    candidate_keys = _candidate_cohort_join_keys(clean_cohort, cohort_cols)
+    candidate_keys = _prioritize_join_keys_for_sql(clean_base, candidate_keys)
     if not candidate_keys:
         return clean_base, None
 
@@ -606,13 +654,16 @@ def _compose_cohort_scoped_sql_from_table_keys(
     selected_owner: str | None = None
     for key in candidate_keys:
         for ref in table_refs:
+            alias = str(ref.get("alias") or "").strip()
             table_name = str(ref.get("table_name") or "").strip()
             if not table_name:
                 continue
             owner = str(ref.get("owner") or "").strip() or None
-            if _table_has_column(table_name=table_name, column_name=key, owner=owner):
+            has_physical_column = _table_has_column(table_name=table_name, column_name=key, owner=owner)
+            has_alias_reference = _sql_references_alias_column(clean_base, alias, key)
+            if has_physical_column or has_alias_reference:
                 selected_key = key
-                selected_alias = str(ref.get("alias") or "").strip()
+                selected_alias = alias
                 selected_table = table_name
                 selected_owner = owner
                 break
@@ -691,10 +742,12 @@ def _compose_cohort_scoped_sql(base_sql: str, cohort_sql: str) -> tuple[str, dic
     if not base_cols or not cohort_cols:
         return clean_base, None
 
+    candidate_keys = _candidate_cohort_join_keys(clean_cohort, cohort_cols)
+    candidate_keys = _prioritize_join_keys_for_sql(clean_base, candidate_keys)
     join_key = next(
         (
             key
-            for key in ("SUBJECT_ID", "HADM_ID", "STAY_ID")
+            for key in candidate_keys
             if key in base_cols and key in cohort_cols
         ),
         None,
@@ -839,6 +892,16 @@ def _sanitize_payload(payload: dict[str, Any] | None) -> dict[str, Any] | None:
     if isinstance(sanitized, dict):
         return sanitized
     return {}
+
+
+def _is_where_clause_required_error(exc: Exception) -> bool:
+    if isinstance(exc, HTTPException):
+        detail = str(exc.detail or "").strip()
+    else:
+        detail = str(exc or "").strip()
+    if not detail:
+        return False
+    return "where clause required" in detail.lower()
 
 
 def _run_oneshot_degraded(req: OneShotRequest) -> dict[str, Any] | None:
@@ -1648,13 +1711,32 @@ def oneshot(req: OneShotRequest):
             qid = str(uuid.uuid4())
             _store_query_payload(qid, payload, user_id)
             return {"qid": qid, "payload": payload}
-        payload = run_oneshot(
-            req.question,
-            translate=req.translate,
-            rag_multi=req.rag_multi,
-            conversation=seeded_conversation,
-            enable_clarification=settings.clarifier_enabled,
-        )
+        try:
+            payload = run_oneshot(
+                req.question,
+                translate=req.translate,
+                rag_multi=req.rag_multi,
+                conversation=seeded_conversation,
+                enable_clarification=settings.clarifier_enabled,
+            )
+        except HTTPException as exc:
+            if not (cohort_sql and _is_where_clause_required_error(exc)):
+                raise
+            payload = run_oneshot(
+                req.question,
+                skip_policy=True,
+                translate=req.translate,
+                rag_multi=req.rag_multi,
+                conversation=seeded_conversation,
+                enable_clarification=settings.clarifier_enabled,
+            )
+            if isinstance(payload, dict):
+                payload["policy"] = {
+                    "passed": False,
+                    "deferred": True,
+                    "detail": "WHERE clause required (deferred to /query/run with cohort scope)",
+                    "checks": [],
+                }
         payload = _sanitize_payload(_attach_oneshot_assistant_message(req.question, payload))
         if isinstance(payload, dict) and cohort_sql:
             payload["cohort_context"] = {
@@ -2036,6 +2118,15 @@ def run_query(req: RunRequest):
                         "join_key": cohort_meta_for_round.get("join_key"),
                     }
                     response["base_sql"] = current_sql
+                elif cohort_sql:
+                    response["cohort"] = {
+                        "applied": False,
+                        "cohort_id": cohort_id,
+                        "cohort_name": cohort_name,
+                        "cohort_type": cohort_type,
+                        "join_key": None,
+                        "reason": "scope_not_applied",
+                    }
                 if auto_repair_history:
                     response["repair"] = {
                         "applied": True,
