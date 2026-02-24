@@ -967,7 +967,7 @@ export function CohortView() {
                   />
                   <div className="flex justify-between text-[10px] text-muted-foreground">
                     <span>7일</span>
-                    <span>현재: {readmitDays[0]}일</span>
+                    <span>기존: {readmitDays[0]}일</span>
                     <span>90일</span>
                   </div>
                 </div>
@@ -987,7 +987,7 @@ export function CohortView() {
                   />
                   <div className="flex justify-between text-[10px] text-muted-foreground">
                     <span>18세</span>
-                    <span>현재: {ageThreshold[0]}세</span>
+                    <span>기존: {ageThreshold[0]}세</span>
                     <span>85세</span>
                   </div>
                 </div>
@@ -1007,7 +1007,7 @@ export function CohortView() {
                   />
                   <div className="flex justify-between text-[10px] text-muted-foreground">
                     <span>1일</span>
-                    <span>현재: {losThreshold[0]}일</span>
+                    <span>기존: {losThreshold[0]}일</span>
                     <span>30일</span>
                   </div>
                 </div>
@@ -1118,7 +1118,7 @@ export function CohortView() {
                   >
                     <div className="flex items-center gap-2">
                       <Label className="text-sm font-medium cursor-pointer">조건 요약</Label>
-                      <Badge variant="secondary" className="text-[10px]">현재 적용</Badge>
+                      <Badge variant="secondary" className="text-[10px]">기존 적용</Badge>
                     </div>
                     {isConditionSummaryOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                   </button>
@@ -1165,7 +1165,7 @@ export function CohortView() {
             <Card className="lg:col-span-2">
               <CardHeader>
                 <CardTitle className="text-lg">시뮬레이션 결과</CardTitle>
-                <CardDescription>현재 기준 대비 예상 변화량</CardDescription>
+                <CardDescription>기존 기준 대비 예상 변화량</CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
@@ -1180,7 +1180,7 @@ export function CohortView() {
                       </div>
                       <div className="flex items-center gap-2 mt-1">
                         <span className="text-xs text-muted-foreground">
-                          현재: {formatMetricValue(metric.current, metric.unit)}
+                          기존: {formatMetricValue(metric.current, metric.unit)}
                           {metric.unit}
                         </span>
                         {getChangeIndicator(metric.current, metric.simulated, metric.unit, metric.inverse)}
@@ -1240,7 +1240,7 @@ export function CohortView() {
                     <Badge variant="outline" className="text-[10px]">나이대 · 성별 · 기저질환</Badge>
                   </div>
                   <p className="text-[11px] text-muted-foreground">
-                    동일 조건에서 현재 기준 대비 시뮬레이션의 하위집단별 변화를 한 번에 비교합니다.
+                    동일 조건에서 기존 기준 대비 시뮬레이션의 하위집단별 변화를 한 번에 비교합니다.
                   </p>
                   <div className="space-y-3">
                     {subgroupSections.map((section) => (
@@ -1254,13 +1254,13 @@ export function CohortView() {
                               <thead className="border-b border-border/60">
                                 <tr className="text-muted-foreground">
                                   <th className="text-left px-2 py-1.5">그룹</th>
-                                  <th className="text-right px-2 py-1.5">현재 환자수</th>
+                                  <th className="text-right px-2 py-1.5">기존 환자수</th>
                                   <th className="text-right px-2 py-1.5">시뮬 환자수</th>
                                   <th className="text-right px-2 py-1.5">Δ 환자수</th>
-                                  <th className="text-right px-2 py-1.5">현재 재입원율</th>
+                                  <th className="text-right px-2 py-1.5">기존 재입원율</th>
                                   <th className="text-right px-2 py-1.5">시뮬 재입원율</th>
                                   <th className="text-right px-2 py-1.5">Δ 재입원율</th>
-                                  <th className="text-right px-2 py-1.5">현재 사망률</th>
+                                  <th className="text-right px-2 py-1.5">기존 사망률</th>
                                   <th className="text-right px-2 py-1.5">시뮬 사망률</th>
                                   <th className="text-right px-2 py-1.5">Δ 사망률</th>
                                   <th className="text-right px-2 py-1.5">Δ 평균LOS</th>
@@ -1362,7 +1362,7 @@ export function CohortView() {
           {filteredSavedCohorts.length === 0 ? (
             <Card>
               <CardContent className="py-8 text-sm text-muted-foreground">
-                저장된 코호트가 없습니다. `코호트 저장`으로 현재 조건을 저장하세요.
+                저장된 코호트가 없습니다. `코호트 저장`으로 기존 조건을 저장하세요.
               </CardContent>
             </Card>
           ) : (
@@ -1477,7 +1477,7 @@ export function CohortView() {
         <DialogContent className="sm:max-w-4xl">
           <DialogHeader>
             <DialogTitle>코호트 생성 SQL</DialogTitle>
-            <DialogDescription>현재 시뮬레이션 조건으로 생성되는 SQL입니다.</DialogDescription>
+            <DialogDescription>기존 시뮬레이션 조건으로 생성되는 SQL입니다.</DialogDescription>
           </DialogHeader>
           <div className="max-h-[65vh] overflow-auto rounded-md border border-border bg-muted/40 p-3">
             <pre className="text-xs leading-relaxed whitespace-pre-wrap break-all font-mono text-foreground">
@@ -1505,7 +1505,7 @@ export function CohortView() {
         <DialogContent className="!w-[92vw] !max-w-[92vw] h-[90vh] p-0 gap-0 flex flex-col overflow-hidden">
           <DialogHeader className="px-6 pt-6 pb-4 border-b border-border shrink-0">
             <DialogTitle>생존 곡선 확대 보기</DialogTitle>
-            <DialogDescription>현재/시뮬레이션 생존 곡선을 크게 확인할 수 있습니다.</DialogDescription>
+            <DialogDescription>기존/시뮬레이션 생존 곡선을 크게 확인할 수 있습니다.</DialogDescription>
           </DialogHeader>
           <div className="flex-1 min-h-0 p-4 bg-card/30">
             {survivalFigure ? (
