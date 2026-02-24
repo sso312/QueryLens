@@ -97,6 +97,11 @@ _COHORT_JOIN_KEYS = ("SUBJECT_ID", "HADM_ID", "STAY_ID")
 _COHORT_JOIN_KEY_PRIORITY = ("STAY_ID", "HADM_ID", "SUBJECT_ID")
 _SAFE_ORACLE_IDENTIFIER_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_$#]*$")
 _TABLE_COLUMN_EXISTS_CACHE: dict[tuple[str, str, str], bool] = {}
+_PDF_COHORT_TYPE = "PDF_DERIVED"
+_TERMINAL_FETCH_ROWS_ONLY_RE = re.compile(
+    r"\s+FETCH\s+(?:FIRST|NEXT)\s+\d+\s+ROWS\s+ONLY\s*$",
+    re.IGNORECASE,
+)
 
 
 class OneShotRequest(BaseModel):
@@ -176,6 +181,27 @@ def _normalize_cohort_sql(sql: str | None) -> str:
     if re.search(r"\b(delete|update|insert|merge|drop|alter|truncate)\b", text, re.IGNORECASE):
         return ""
     return text
+
+
+def _normalize_cohort_type(value: str | None) -> str:
+    return str(value or "").strip().upper()
+
+
+def _strip_terminal_fetch_rows_only(sql: str | None) -> str:
+    text = _strip_terminal_semicolon(str(sql or ""))
+    if not text:
+        return ""
+    stripped = _TERMINAL_FETCH_ROWS_ONLY_RE.sub("", text).strip()
+    return stripped or text
+
+
+def _cohort_sql_for_context_apply(*, cohort_sql: str | None, cohort_type: str | None) -> str:
+    normalized = _normalize_cohort_sql(cohort_sql)
+    if not normalized:
+        return ""
+    if _normalize_cohort_type(cohort_type) == _PDF_COHORT_TYPE:
+        return _strip_terminal_fetch_rows_only(normalized)
+    return normalized
 
 
 def _normalize_requested_model(model: str | None) -> str:
@@ -906,11 +932,15 @@ def _is_where_clause_required_error(exc: Exception) -> bool:
 
 def _run_oneshot_degraded(req: OneShotRequest) -> dict[str, Any] | None:
     conversation = req.conversation
-    cohort_sql = _normalize_cohort_sql(req.cohort_sql)
+    cohort_type = str(req.cohort_type or "").strip()
+    cohort_sql = _cohort_sql_for_context_apply(
+        cohort_sql=req.cohort_sql,
+        cohort_type=cohort_type,
+    )
     if cohort_sql:
         prompt = _build_cohort_context_prompt(
             cohort_name=str(req.cohort_name or "").strip(),
-            cohort_type=str(req.cohort_type or "").strip(),
+            cohort_type=cohort_type,
             cohort_sql=cohort_sql,
         )
         conversation = [{"role": "assistant", "content": prompt}, *(req.conversation or [])]
@@ -1688,12 +1718,20 @@ def oneshot(req: OneShotRequest):
     error_detail = None
     try:
         cohort_apply_requested = req.cohort_apply
-        cohort_sql = _normalize_cohort_sql(req.cohort_sql) if cohort_apply_requested is not False else ""
+        cohort_type = str(req.cohort_type or "").strip()
+        cohort_sql = (
+            _cohort_sql_for_context_apply(
+                cohort_sql=req.cohort_sql,
+                cohort_type=cohort_type,
+            )
+            if cohort_apply_requested is not False
+            else ""
+        )
         seeded_conversation = req.conversation
         if cohort_sql:
             cohort_prompt = _build_cohort_context_prompt(
                 cohort_name=str(req.cohort_name or "").strip(),
-                cohort_type=str(req.cohort_type or "").strip(),
+                cohort_type=cohort_type,
                 cohort_sql=cohort_sql,
             )
             seeded_conversation = [{"role": "assistant", "content": cohort_prompt}, *(req.conversation or [])]
@@ -1705,7 +1743,7 @@ def oneshot(req: OneShotRequest):
                 payload["cohort_context"] = {
                     "cohort_id": str(req.cohort_id or "").strip() or None,
                     "cohort_name": str(req.cohort_name or "").strip() or None,
-                    "cohort_type": str(req.cohort_type or "").strip() or None,
+                    "cohort_type": cohort_type or None,
                     "cohort_sql": cohort_sql,
                 }
             qid = str(uuid.uuid4())
@@ -1742,7 +1780,7 @@ def oneshot(req: OneShotRequest):
             payload["cohort_context"] = {
                 "cohort_id": str(req.cohort_id or "").strip() or None,
                 "cohort_name": str(req.cohort_name or "").strip() or None,
-                "cohort_type": str(req.cohort_type or "").strip() or None,
+                "cohort_type": cohort_type or None,
                 "cohort_sql": cohort_sql,
             }
         qid = str(uuid.uuid4())
@@ -1890,6 +1928,11 @@ def run_query(req: RunRequest):
             if not cohort_type:
                 cohort_type = str(stored_context.get("cohort_type") or "").strip() or None
 
+    cohort_sql_for_apply = _cohort_sql_for_context_apply(
+        cohort_sql=cohort_sql,
+        cohort_type=cohort_type,
+    )
+
     user_token = set_request_user(user_id)
     model_token = set_request_llm_model(_normalize_requested_model(req.model))
 
@@ -1990,8 +2033,8 @@ def run_query(req: RunRequest):
                     )
             effective_sql = current_sql
             cohort_meta_for_round: dict[str, Any] | None = None
-            if cohort_sql:
-                scoped_sql, scoped_meta = _compose_cohort_scoped_sql(current_sql, cohort_sql)
+            if cohort_sql_for_apply:
+                scoped_sql, scoped_meta = _compose_cohort_scoped_sql(current_sql, cohort_sql_for_apply)
                 if scoped_sql:
                     effective_sql = scoped_sql
                     cohort_meta_for_round = scoped_meta
@@ -2118,7 +2161,7 @@ def run_query(req: RunRequest):
                         "join_key": cohort_meta_for_round.get("join_key"),
                     }
                     response["base_sql"] = current_sql
-                elif cohort_sql:
+                elif cohort_sql_for_apply:
                     response["cohort"] = {
                         "applied": False,
                         "cohort_id": cohort_id,

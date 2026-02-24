@@ -1803,7 +1803,7 @@ def generate_smart_sql(req: SmartSqlRequest):
             },
             "db_result": {
                 "columns": db_result.get("columns", []),
-                "rows": db_result.get("rows", [])[:50],
+                "rows": db_result.get("rows", [])[:100],
                 "row_count": db_result.get("row_count", 0),
                 "total_count": db_result.get("total_count"),
                 "error": db_result.get("error"),
