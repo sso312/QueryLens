@@ -3761,6 +3761,21 @@ WHERE {operator_exists} (
                     elif isinstance(row, dict):
                         step_rows.append(row)
                 db_result["step_counts"] = step_rows
+                if db_result.get("total_count") is None and step_rows:
+                    final_step = step_rows[-1] if isinstance(step_rows[-1], dict) else {}
+                    final_count_raw = (
+                        final_step.get("cnt")
+                        or final_step.get("count")
+                        or final_step.get("value")
+                        or final_step.get("n")
+                        or final_step.get("rows")
+                    )
+                    try:
+                        final_count = int(final_count_raw)
+                        if final_count >= 0:
+                            db_result["total_count"] = final_count
+                    except Exception:
+                        pass
         except Exception as e:
             logger.error(f"DB 실행 중 오류: {e}")
             logger.error(

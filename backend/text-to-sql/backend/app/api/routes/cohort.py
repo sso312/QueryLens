@@ -50,6 +50,7 @@ _SURVIVAL_TIME_POINTS = [0, 7, 14, 21, 30, 45, 60, 75, 90, 120, 150, 180]
 _COHORT_COMORBIDITY_SPECS_PATH = project_path("var/metadata/cohort_comorbidity_specs.json")
 _SIM_CACHE_MAXSIZE = 256
 _SQL_WRITE_KEYWORDS = re.compile(r"\b(delete|update|insert|merge|drop|alter|truncate)\b", re.IGNORECASE)
+_TERMINAL_FETCH_ROWS_ONLY_RE = re.compile(r"\s+FETCH\s+FIRST\s+\d+\s+ROWS\s+ONLY\s*$", re.IGNORECASE)
 
 
 class CohortParams(BaseModel):
@@ -166,6 +167,11 @@ def _iso_now() -> str:
 
 def _strip_terminal_semicolon(sql: str) -> str:
     return str(sql or "").strip().rstrip(";").strip()
+
+
+def _strip_terminal_fetch_rows_only(sql: str) -> str:
+    clean_sql = _strip_terminal_semicolon(sql)
+    return _TERMINAL_FETCH_ROWS_ONLY_RE.sub("", clean_sql).strip()
 
 
 def _validate_readonly_sql(sql: str) -> None:
@@ -1793,19 +1799,32 @@ def generate_smart_sql(req: SmartSqlRequest):
         if not final_sql:
             raise HTTPException(status_code=500, detail="SQL generation failed")
 
+        count_sql = f"SELECT COUNT(*) FROM ({final_sql.replace('FETCH FIRST 100 ROWS ONLY', '')})"
         with use_request_user(req_user):
             db_result = execute_sql(final_sql)
+            total_count = db_result.get("total_count")
+            if total_count is None:
+                try:
+                    count_result = execute_sql(count_sql)
+                    rows, _ = _extract_rows_columns(count_result)
+                    first_row = rows[0] if rows and isinstance(rows[0], (list, tuple)) else None
+                    if first_row and len(first_row) > 0:
+                        total_count = _to_int(first_row[0], default=-1)
+                        if total_count < 0:
+                            total_count = None
+                except Exception:
+                    total_count = None
 
         return {
             "generated_sql": {
                 "cohort_sql": final_sql,
-                "count_sql": f"SELECT COUNT(*) FROM ({final_sql.replace('FETCH FIRST 100 ROWS ONLY', '')})",
+                "count_sql": count_sql,
             },
             "db_result": {
                 "columns": db_result.get("columns", []),
                 "rows": db_result.get("rows", [])[:100],
                 "row_count": db_result.get("row_count", 0),
-                "total_count": db_result.get("total_count"),
+                "total_count": total_count,
                 "error": db_result.get("error"),
             },
             "user": req_user,
@@ -1858,10 +1877,25 @@ def confirm_pdf_cohort(req: ConfirmPdfCohortRequest):
     if validation_error:
         db_result["error"] = validation_error
     else:
+        total_count = validation_res.get("total_count")
+        if total_count is None:
+            count_sql = str((generated_sql or {}).get("count_sql") or "").strip()
+            if not count_sql:
+                count_sql = f"SELECT COUNT(*) AS CNT FROM ({_strip_terminal_fetch_rows_only(cohort_sql)}) cohort_src"
+            with use_request_user(req_user):
+                try:
+                    count_result = execute_sql(count_sql)
+                    rows, _ = _extract_rows_columns(count_result)
+                    first_row = rows[0] if rows and isinstance(rows[0], (list, tuple)) else None
+                    if first_row and len(first_row) > 0:
+                        parsed_count = _to_int(first_row[0], default=-1)
+                        total_count = parsed_count if parsed_count >= 0 else None
+                except Exception:
+                    total_count = None
         db_result["columns"] = validation_res.get("columns", [])
         db_result["rows"] = validation_res.get("rows", [])[:100]
         db_result["row_count"] = validation_res.get("row_count", 0)
-        db_result["total_count"] = validation_res.get("total_count")
+        db_result["total_count"] = total_count
         db_result["error"] = None
     merged_data["db_result"] = db_result
 
@@ -1938,12 +1972,18 @@ def create_cohort_library_item(req: CohortLibraryCreateRequest):
     cohort_sql = _strip_terminal_semicolon(req.cohort_sql)
     _validate_readonly_sql(cohort_sql)
     now_iso = _iso_now()
+    cohort_type = str(req.type or "").strip().upper()
+    count_target_sql = _strip_terminal_fetch_rows_only(cohort_sql) if cohort_type == "PDF_DERIVED" else cohort_sql
     count_value = req.count
-    if count_value is None:
+    should_force_recount = cohort_type == "PDF_DERIVED"
+    if should_force_recount or count_value is None:
         try:
-            count_value = _best_effort_count_from_sql(cohort_sql, req_user)
+            recounted = _best_effort_count_from_sql(count_target_sql, req_user)
+            if recounted is not None:
+                count_value = recounted
         except Exception:
-            count_value = None
+            if count_value is None:
+                count_value = None
 
     normalized = _normalize_saved_cohort_item(
         {

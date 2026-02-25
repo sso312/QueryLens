@@ -102,6 +102,10 @@ _TERMINAL_FETCH_ROWS_ONLY_RE = re.compile(
     r"\s+FETCH\s+(?:FIRST|NEXT)\s+\d+\s+ROWS\s+ONLY\s*$",
     re.IGNORECASE,
 )
+_TERMINAL_FETCH_ROWS_ONLY_WITH_LIMIT_RE = re.compile(
+    r"\s+FETCH\s+(?:FIRST|NEXT)\s+(\d+)\s+ROWS\s+ONLY\s*$",
+    re.IGNORECASE,
+)
 
 
 class OneShotRequest(BaseModel):
@@ -195,11 +199,30 @@ def _strip_terminal_fetch_rows_only(sql: str | None) -> str:
     return stripped or text
 
 
+def _terminal_fetch_row_limit(sql: str | None) -> int | None:
+    text = _strip_terminal_semicolon(str(sql or ""))
+    if not text:
+        return None
+    match = _TERMINAL_FETCH_ROWS_ONLY_WITH_LIMIT_RE.search(text)
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except Exception:
+        return None
+
+
 def _cohort_sql_for_context_apply(*, cohort_sql: str | None, cohort_type: str | None) -> str:
     normalized = _normalize_cohort_sql(cohort_sql)
     if not normalized:
         return ""
-    if _normalize_cohort_type(cohort_type) == _PDF_COHORT_TYPE:
+    normalized_type = _normalize_cohort_type(cohort_type)
+    if normalized_type == _PDF_COHORT_TYPE:
+        return _strip_terminal_fetch_rows_only(normalized)
+    # Some clients can omit cohort_type on run/apply requests.
+    # PDF cohort SQL is display-capped at 100 rows, so remove terminal
+    # FETCH 100 on context apply to scope by the full cohort.
+    if not normalized_type and _terminal_fetch_row_limit(normalized) == 100:
         return _strip_terminal_fetch_rows_only(normalized)
     return normalized
 
@@ -1916,7 +1939,7 @@ def run_query(req: RunRequest):
     cohort_id = str(req.cohort_id or "").strip() or None
     cohort_name = str(req.cohort_name or "").strip() or None
     cohort_type = str(req.cohort_type or "").strip() or None
-    should_fallback_stored_cohort = cohort_apply_requested is None
+    should_fallback_stored_cohort = cohort_apply_requested is not False
     if should_fallback_stored_cohort and not cohort_sql and isinstance(stored, dict):
         stored_context = stored.get("cohort_context")
         if isinstance(stored_context, dict):
@@ -1927,6 +1950,10 @@ def run_query(req: RunRequest):
                 cohort_name = str(stored_context.get("cohort_name") or "").strip() or None
             if not cohort_type:
                 cohort_type = str(stored_context.get("cohort_type") or "").strip() or None
+    if not cohort_type and isinstance(stored, dict):
+        stored_context = stored.get("cohort_context")
+        if isinstance(stored_context, dict):
+            cohort_type = str(stored_context.get("cohort_type") or "").strip() or None
 
     cohort_sql_for_apply = _cohort_sql_for_context_apply(
         cohort_sql=cohort_sql,

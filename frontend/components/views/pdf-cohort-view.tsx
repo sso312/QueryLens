@@ -74,6 +74,44 @@ export function PdfCohortView({ onPinnedChange }: PdfCohortViewProps) {
         return Number.isFinite(n) ? n : fallback
     }
 
+    const toOptionalNumber = (value: any): number | null => {
+        if (typeof value === "number" && Number.isFinite(value)) return value
+        if (typeof value === "string") {
+            const parsed = Number(value.replace(/,/g, "").trim())
+            if (Number.isFinite(parsed)) return parsed
+        }
+        return null
+    }
+
+    const resolvePdfPatientCount = (result: any): number | null => {
+        const dbResult = result?.db_result || result?.cohort_result || {}
+        const stepCounts = Array.isArray(dbResult?.step_counts) ? dbResult.step_counts : []
+        for (let i = stepCounts.length - 1; i >= 0; i -= 1) {
+            const step = stepCounts[i]
+            if (Array.isArray(step)) {
+                const value = toOptionalNumber(step[1])
+                if (value != null) return value
+                continue
+            }
+            if (step && typeof step === "object") {
+                const obj = step as Record<string, unknown>
+                const value = toOptionalNumber(obj.cnt ?? obj.count ?? obj.value ?? obj.n ?? obj.rows)
+                if (value != null) return value
+            }
+        }
+
+        const countCandidates = [
+            result?.count_result?.patient_count,
+            dbResult?.total_count,
+            dbResult?.row_count,
+        ]
+        for (const candidate of countCandidates) {
+            const parsed = toOptionalNumber(candidate)
+            if (parsed != null) return parsed
+        }
+        return null
+    }
+
     const apiPathWithUser = (path: string) => {
         if (!pdfUser) return path
         const separator = path.includes("?") ? "&" : "?"
@@ -162,18 +200,13 @@ export function PdfCohortView({ onPinnedChange }: PdfCohortViewProps) {
                 .filter((name: string) => Boolean(name))
                 .slice(0, 24)
             : []
-        const dbResult = result?.db_result || result?.cohort_result || {}
-        const rawCount =
-            dbResult?.total_count ??
-            dbResult?.row_count ??
-            result?.count_result?.patient_count
-        const patientCount = Number(rawCount)
+        const patientCountRaw = resolvePdfPatientCount(result)
         return {
             cohortId: hash || `pdf-${Date.now()}`,
             cohortName: String(result?.filename || "PDF 기반 코호트").trim() || "PDF 기반 코호트",
             type: "PDF_DERIVED",
             cohortSql,
-            patientCount: Number.isFinite(patientCount) ? patientCount : null,
+            patientCount: patientCountRaw != null ? Math.max(0, Math.round(patientCountRaw)) : null,
             sqlFilterSummary: String(cd?.criteria_summary_ko || "").trim(),
             summaryKo: String(cd?.summary_ko || result?.summary_ko || "").trim(),
             criteriaSummaryKo: String(cd?.criteria_summary_ko || "").trim(),
@@ -524,13 +557,8 @@ export function PdfCohortView({ onPinnedChange }: PdfCohortViewProps) {
                 )
             : []
 
-        const dbResult = sourceResult?.db_result || sourceResult?.cohort_result || {}
-        const rawCount =
-            dbResult?.total_count ??
-            dbResult?.row_count ??
-            sourceResult?.count_result?.patient_count
-        const numericCount = Number(rawCount)
-        const patientCount = Number.isFinite(numericCount) ? numericCount : undefined
+        const patientCountRaw = resolvePdfPatientCount(sourceResult)
+        const patientCount = patientCountRaw != null ? Math.max(0, Math.round(patientCountRaw)) : undefined
 
         const res = await fetch("/cohort/library", {
             method: "POST",
